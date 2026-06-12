@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type FormEvent } from "react";
 
+import { AuthPasswordField } from "@/components/AuthPasswordField";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 
 export function LoginForm() {
@@ -55,20 +57,13 @@ export function LoginForm() {
         />
       </div>
 
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-ink/70" htmlFor="password">
-          Password
-        </label>
-        <input
-          id="password"
-          type="password"
-          required
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          className="w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm outline-none transition focus:border-gold"
-          placeholder="Enter your password"
-        />
-      </div>
+      <AuthPasswordField
+        id="password"
+        label="Password"
+        value={password}
+        onChange={setPassword}
+        placeholder="Enter your password"
+      />
 
       {error ? <p className="rounded-2xl bg-ember/10 px-4 py-3 text-sm text-ember">{error}</p> : null}
 
@@ -79,6 +74,13 @@ export function LoginForm() {
       >
         {pending ? "Signing in..." : "Sign in"}
       </button>
+
+      <p className="text-center text-sm text-ink/60">
+        New here?{" "}
+        <Link href="/signup" className="font-semibold text-pine transition hover:text-ink">
+          Create an account
+        </Link>
+      </p>
     </form>
   );
 }

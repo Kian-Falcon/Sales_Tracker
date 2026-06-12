@@ -27,7 +27,7 @@ function getPageLabel(pathname: string) {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const isLoginRoute = pathname.startsWith("/login");
+  const isAuthRoute = pathname.startsWith("/login") || pathname.startsWith("/signup");
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -56,7 +56,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const pageLabel = useMemo(() => getPageLabel(pathname), [pathname]);
 
-  if (isLoginRoute) {
+  if (isAuthRoute) {
     return <main className="mx-auto min-h-screen max-w-7xl px-4 py-8 sm:px-6 lg:px-8">{children}</main>;
   }
 

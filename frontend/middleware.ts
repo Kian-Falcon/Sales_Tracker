@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { updateSession } from "@/lib/supabase-middleware";
 
 export async function middleware(request: NextRequest) {
+  const isAuthRoute =
+    request.nextUrl.pathname.startsWith("/login") || request.nextUrl.pathname.startsWith("/signup");
+
   if (
     request.nextUrl.pathname.startsWith("/_next") ||
     request.nextUrl.pathname.startsWith("/favicon.ico") ||
@@ -17,17 +20,17 @@ export async function middleware(request: NextRequest) {
       data: { session }
     } = await supabase.auth.getSession();
 
-    if (!session && !request.nextUrl.pathname.startsWith("/login")) {
+    if (!session && !isAuthRoute) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
 
-    if (session && request.nextUrl.pathname.startsWith("/login")) {
+    if (session && isAuthRoute) {
       return NextResponse.redirect(new URL("/dashboard", request.url));
     }
 
     return response;
   } catch {
-    if (!request.nextUrl.pathname.startsWith("/login")) {
+    if (!isAuthRoute) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
     return NextResponse.next();
