@@ -166,7 +166,7 @@ export async function downloadProjectsCsv(accessToken?: string) {
   });
 
   if (!response.ok) {
-    throw new Error("Export failed.");
+    throw new Error(await getApiErrorMessage(response));
   }
 
   return response.blob();

@@ -1,7 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useUpdateWorkflowSettingsMutation } from "@/hooks/useWorkflowSettings";
 import type { Department, WorkflowStageSetting } from "@/lib/types";
@@ -22,27 +21,90 @@ export function WorkflowSettingsEditor({
 }: {
   initialSettings: WorkflowStageSetting[];
 }) {
-  const router = useRouter();
   const updateWorkflowSettings = useUpdateWorkflowSettingsMutation();
   const [settings, setSettings] = useState(initialSettings);
+  const [savedSettings, setSavedSettings] = useState(initialSettings);
+  const [saveTarget, setSaveTarget] = useState<string | "all" | null>(null);
 
-  const hasChanges = settings.some((setting, index) => {
-    const initial = initialSettings[index];
+  useEffect(() => {
+    setSettings(initialSettings);
+    setSavedSettings(initialSettings);
+  }, [initialSettings]);
+
+  const settingsByStageKey = useMemo(
+    () => new Map(settings.map((setting) => [setting.stage_key, setting])),
+    [settings]
+  );
+  const savedSettingsByStageKey = useMemo(
+    () => new Map(savedSettings.map((setting) => [setting.stage_key, setting])),
+    [savedSettings]
+  );
+
+  function buildPayload(source: WorkflowStageSetting[]) {
+    return source.map((setting) => ({
+      stage_key: setting.stage_key,
+      responsible_dept: setting.responsible_dept,
+      default_due_days: setting.default_due_days
+    }));
+  }
+
+  function rowHasChanges(stageKey: string) {
+    const current = settingsByStageKey.get(stageKey);
+    const saved = savedSettingsByStageKey.get(stageKey);
+
     return (
-      initial?.responsible_dept !== setting.responsible_dept ||
-      initial?.default_due_days !== setting.default_due_days
+      current?.responsible_dept !== saved?.responsible_dept ||
+      current?.default_due_days !== saved?.default_due_days
     );
-  });
+  }
 
-  async function handleSave() {
-    await updateWorkflowSettings.mutateAsync(
-      settings.map((setting) => ({
-        stage_key: setting.stage_key,
-        responsible_dept: setting.responsible_dept,
-        default_due_days: setting.default_due_days
-      }))
+  const dirtyStageKeys = new Set(
+    settings.filter((setting) => rowHasChanges(setting.stage_key)).map((setting) => setting.stage_key)
+  );
+  const hasChanges = dirtyStageKeys.size > 0;
+
+  async function persistSettings(
+    nextSettings: WorkflowStageSetting[],
+    target: string | "all",
+    preserveDirtyStageKeys: Set<string> = new Set()
+  ) {
+    setSaveTarget(target);
+    try {
+      const updatedSettings = await updateWorkflowSettings.mutateAsync(buildPayload(nextSettings));
+      setSavedSettings(updatedSettings);
+      setSettings((current) =>
+        updatedSettings.map((updatedSetting) => {
+          if (
+            target !== "all" &&
+            preserveDirtyStageKeys.has(updatedSetting.stage_key) &&
+            updatedSetting.stage_key !== target
+          ) {
+            return current.find((item) => item.stage_key === updatedSetting.stage_key) ?? updatedSetting;
+          }
+
+          return updatedSetting;
+        })
+      );
+    } finally {
+      setSaveTarget(null);
+    }
+  }
+
+  async function handleSaveAll() {
+    await persistSettings(settings, "all");
+  }
+
+  async function handleRowSave(stageKey: string) {
+    const rowDraft = settingsByStageKey.get(stageKey);
+    if (!rowDraft) {
+      return;
+    }
+
+    const nextSettings = savedSettings.map((setting) =>
+      setting.stage_key === stageKey ? rowDraft : setting
     );
-    router.refresh();
+
+    await persistSettings(nextSettings, stageKey, dirtyStageKeys);
   }
 
   return (
@@ -62,21 +124,21 @@ export function WorkflowSettingsEditor({
         <div className="mt-6 flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={handleSave}
+            onClick={() => void handleSaveAll()}
             disabled={!hasChanges || updateWorkflowSettings.isPending}
             className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-white transition hover:bg-pine disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {updateWorkflowSettings.isPending ? "Saving..." : "Save workflow settings"}
+            {saveTarget === "all" && updateWorkflowSettings.isPending ? "Saving..." : "Save all changes"}
           </button>
           <button
             type="button"
-            onClick={() => setSettings(initialSettings)}
+            onClick={() => setSettings(savedSettings)}
             disabled={!hasChanges || updateWorkflowSettings.isPending}
             className="rounded-full border border-ink px-4 py-2 text-sm font-medium text-ink transition hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
             Reset unsaved changes
           </button>
-          {updateWorkflowSettings.isSuccess ? (
+          {updateWorkflowSettings.isSuccess && !hasChanges ? (
             <span className="text-sm text-pine">Workflow settings saved.</span>
           ) : null}
           {updateWorkflowSettings.error ? (
@@ -104,7 +166,7 @@ export function WorkflowSettingsEditor({
               {phaseSettings.map((setting) => (
                 <article
                   key={setting.stage_key}
-                  className="grid gap-4 rounded-[28px] border border-ink/10 bg-white p-5 shadow-panel md:grid-cols-[minmax(0,1.4fr)_220px_180px]"
+                  className="grid gap-4 rounded-[28px] border border-ink/10 bg-white p-5 shadow-panel md:grid-cols-[minmax(0,1.3fr)_220px_180px_160px]"
                 >
                   <div className="space-y-2">
                     <div>
@@ -172,6 +234,27 @@ export function WorkflowSettingsEditor({
                       placeholder="No auto SLA"
                     />
                   </label>
+
+                  <div className="space-y-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">
+                      Actions
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleRowSave(setting.stage_key)}
+                      disabled={!rowHasChanges(setting.stage_key) || updateWorkflowSettings.isPending}
+                      className="w-full rounded-full border border-ink px-4 py-2 text-sm font-medium text-ink transition hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {saveTarget === setting.stage_key && updateWorkflowSettings.isPending
+                        ? "Saving..."
+                        : rowHasChanges(setting.stage_key)
+                          ? "Save row"
+                          : "Saved"}
+                    </button>
+                    <p className={`text-xs ${rowHasChanges(setting.stage_key) ? "text-gold" : "text-ink/45"}`}>
+                      {rowHasChanges(setting.stage_key) ? "Unsaved row changes" : "No row changes"}
+                    </p>
+                  </div>
                 </article>
               ))}
             </div>

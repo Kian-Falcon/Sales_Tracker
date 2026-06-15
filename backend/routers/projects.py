@@ -19,6 +19,59 @@ from services.workflow_settings import load_stage_blueprint
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 
 
+def _project_status_label(current_stage_status: str | None) -> str:
+    if current_stage_status == "overdue":
+        return "Overdue"
+
+    if current_stage_status:
+        return "Active"
+
+    return "Completed"
+
+
+def _stage_status_label(current_stage_status: str | None) -> str:
+    if not current_stage_status:
+        return ""
+
+    return current_stage_status.replace("_", " ").title()
+
+
+def _eta_label(current_stage_due_date: date | None, current_stage_status: str | None) -> str:
+    if current_stage_status is None:
+        return "--"
+
+    if current_stage_due_date is None:
+        return "Not set"
+
+    diff_days = (current_stage_due_date - date.today()).days
+    is_late = current_stage_status == "overdue" or diff_days < 0
+
+    if is_late:
+        return f"{abs(diff_days)}d late"
+
+    if diff_days == 0:
+        return "Due today"
+
+    return f"{diff_days}d left"
+
+
+def _format_pending_duration(start_value: datetime | None, end_value: datetime | None = None) -> str:
+    if start_value is None:
+        return "Not started"
+
+    end = end_value or datetime.now(timezone.utc)
+    diff = max(timedelta(0), end - start_value)
+
+    if diff.days >= 1:
+        return f"{diff.days} day{'' if diff.days == 1 else 's'}"
+
+    diff_hours = int(diff.total_seconds() // 3600)
+    if diff_hours >= 1:
+        return f"{diff_hours} hour{'' if diff_hours == 1 else 's'}"
+
+    return "Less than 1 hour"
+
+
 def _build_project_detail(project: dict, stage_rows: list[dict], comment_rows: list[dict]) -> ProjectDetail:
     comments_by_stage: dict[UUID, list[CommentRead]] = defaultdict(list)
     for comment in comment_rows:
@@ -219,18 +272,24 @@ async def export_projects_csv(
             p.name AS project_name,
             p.client,
             p.brand,
-            s.stage_key,
-            s.phase,
-            s.name AS stage_name,
-            s.responsible_dept,
-            s.status,
-            a.action AS audit_action,
-            a.changed_at AS audit_changed_at
+            p.created_at,
+            s.name AS current_stage_name,
+            s.phase AS current_stage_phase,
+            s.responsible_dept AS current_stage_dept,
+            s.status AS current_stage_status,
+            s.activated_at AS current_stage_activated_at,
+            s.due_date AS current_stage_due_date
         FROM projects p
-        LEFT JOIN stages s ON s.project_id = p.id
-        LEFT JOIN audit_log a ON a.table_name = 'stages' AND a.record_id = s.id
+        LEFT JOIN LATERAL (
+            SELECT *
+            FROM stages
+            WHERE project_id = p.id
+              AND status IN ('active', 'overdue')
+            ORDER BY sort_order
+            LIMIT 1
+        ) s ON TRUE
         WHERE p.is_archived = FALSE
-        ORDER BY p.project_code, s.sort_order, a.changed_at
+        ORDER BY p.created_at DESC
         """
     )
 
@@ -242,18 +301,42 @@ async def export_projects_csv(
             "project_name",
             "client",
             "brand",
-            "stage_key",
-            "phase",
-            "stage_name",
-            "responsible_dept",
-            "status",
-            "audit_action",
-            "audit_changed_at",
+            "project_status",
+            "current_stage",
+            "current_phase",
+            "responsible_department",
+            "stage_status",
+            "due_date",
+            "eta",
+            "pending_duration",
+            "activated_at",
+            "created_at",
         ],
     )
     writer.writeheader()
     for row in records_to_dicts(rows):
-        writer.writerow(row)
+        writer.writerow(
+            {
+                "project_code": row["project_code"],
+                "project_name": row["project_name"],
+                "client": row["client"],
+                "brand": row["brand"] or "",
+                "project_status": _project_status_label(row["current_stage_status"]),
+                "current_stage": row["current_stage_name"] or "",
+                "current_phase": row["current_stage_phase"].title() if row["current_stage_phase"] else "",
+                "responsible_department": row["current_stage_dept"] or "",
+                "stage_status": _stage_status_label(row["current_stage_status"]),
+                "due_date": row["current_stage_due_date"].isoformat() if row["current_stage_due_date"] else "",
+                "eta": _eta_label(row["current_stage_due_date"], row["current_stage_status"]),
+                "pending_duration": _format_pending_duration(row["current_stage_activated_at"])
+                if row["current_stage_status"]
+                else "Completed",
+                "activated_at": row["current_stage_activated_at"].isoformat()
+                if row["current_stage_activated_at"]
+                else "",
+                "created_at": row["created_at"].isoformat(),
+            }
+        )
 
     buffer.seek(0)
     return StreamingResponse(

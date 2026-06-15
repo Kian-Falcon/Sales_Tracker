@@ -26,6 +26,7 @@ export function StageRow({
   const setDueDate = useSetDueDateMutation();
   const [dueDate, setDueDate_] = useState(stage.due_date ?? "");
   const canComplete = viewerDepartment === stage.responsible_dept || viewerDepartment === "Admin";
+  const canMarkStageComplete = canComplete && ["active", "overdue"].includes(stage.status);
   const canSetInitialDueDate =
     !stage.due_date &&
     (viewerDepartment === "Sales" ||
@@ -33,6 +34,7 @@ export function StageRow({
       viewerDepartment === stage.responsible_dept);
   const canSchedule = viewerDepartment === "Admin" || canSetInitialDueDate;
   const canComment = ["active", "overdue"].includes(stage.status);
+  const showCompletionAction = canMarkStageComplete || stage.status === "done";
 
   return (
     <section className="space-y-4 rounded-[28px] border border-ink/10 bg-white p-5 shadow-panel">
@@ -78,14 +80,18 @@ export function StageRow({
           {!canSchedule && stage.due_date ? (
             <p className="text-xs text-ink/45">Dates lock after scheduling. Only Admin can override them.</p>
           ) : null}
-          {canComplete ? (
+          {showCompletionAction ? (
             <button
               type="button"
-              disabled={completeStage.isPending || !["active", "overdue"].includes(stage.status)}
+              disabled={completeStage.isPending || stage.status === "done" || !canMarkStageComplete}
               onClick={() => completeStage.mutate(stage.id, { onSuccess: () => router.refresh() })}
-              className="rounded-full bg-pine px-4 py-2 text-sm font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-70"
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                stage.status === "done"
+                  ? "border border-ink/10 bg-sand/60 text-ink/45"
+                  : "bg-pine text-white hover:bg-ink disabled:cursor-not-allowed disabled:opacity-70"
+              }`}
             >
-              {completeStage.isPending ? "Saving..." : "Mark Complete"}
+              {completeStage.isPending ? "Saving..." : stage.status === "done" ? "Completed" : "Mark Complete"}
             </button>
           ) : null}
         </div>

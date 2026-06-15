@@ -49,10 +49,13 @@ class ProjectExportRow(BaseModel):
     project_name: str
     client: str
     brand: str | None = None
-    stage_key: str | None = None
-    phase: StagePhase | None = None
-    stage_name: str | None = None
-    responsible_dept: Department | None = None
-    status: StageStatus | None = None
-    audit_action: str | None = None
-    audit_changed_at: datetime | None = None
+    project_status: str
+    current_stage: str | None = None
+    current_phase: StagePhase | None = None
+    responsible_department: Department | None = None
+    stage_status: StageStatus | None = None
+    due_date: str | None = None
+    eta: str
+    pending_duration: str
+    activated_at: datetime | None = None
+    created_at: datetime
