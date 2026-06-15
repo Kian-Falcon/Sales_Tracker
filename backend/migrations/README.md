@@ -27,6 +27,7 @@ Run these files in Supabase SQL Editor, top to bottom:
 8. `008_stage_activation_tracking.sql`
 9. `009_workflow_migration_backups.sql`
 10. `010_workflow_stage_settings.sql`
+11. `011_audit_actor_context.sql`
 
 ## What The Migrations Create
 

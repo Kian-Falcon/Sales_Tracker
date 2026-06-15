@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from auth import get_current_user
-from database import get_pool, transaction
+from database import get_pool, set_audit_actor, transaction
 from models.common import CurrentUser, Department
 from models.project import ProjectDetail
 from models.stage import StageDueDateUpdate
@@ -29,6 +29,8 @@ async def complete_stage(
 
         if stage["status"] not in {"active", "overdue"}:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only active or overdue stages can be completed.")
+
+        await set_audit_actor(connection, user.user_id)
 
         await connection.execute(
             """
@@ -97,6 +99,8 @@ async def set_stage_due_date(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Due dates lock after scheduling. Only Admin can change an existing date.",
             )
+
+        await set_audit_actor(connection, user.user_id)
 
         await connection.execute(
             "UPDATE stages SET due_date = $2 WHERE id = $1",

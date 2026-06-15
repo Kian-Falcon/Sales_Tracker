@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from auth import get_current_user, require_departments
-from database import get_pool, record_to_dict, records_to_dicts, transaction
+from database import get_pool, record_to_dict, records_to_dicts, set_audit_actor, transaction
 from models.comment import CommentRead
 from models.common import CurrentUser, Department, StageSnapshot
 from models.project import DashboardSummary, ProjectCreate, ProjectDetail, ProjectSummary
@@ -188,6 +188,7 @@ async def create_project(
     try:
         async with transaction(pool) as connection:
             stage_blueprint = await load_stage_blueprint(connection)
+            await set_audit_actor(connection, user.user_id)
             project = await connection.fetchrow(
                 """
                 INSERT INTO projects (project_code, name, client, brand, created_by)

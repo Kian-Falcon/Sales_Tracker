@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from auth import require_departments
-from database import get_pool, transaction
+from database import get_pool, set_audit_actor, transaction
 from models.common import CurrentUser, Department
 from models.workflow_settings import (
     WorkflowStageSettingRead,
@@ -65,6 +65,7 @@ async def update_workflow_settings(
         )
 
         # Keep not-yet-started work aligned with the latest template ownership.
+        await set_audit_actor(connection, user.user_id)
         await connection.execute(
             """
             UPDATE stages AS s

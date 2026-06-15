@@ -34,6 +34,14 @@ def patch_transaction(monkeypatch, module, connection) -> None:
     monkeypatch.setattr(module, "transaction", fake_transaction)
 
 
+def patch_audit_actor(monkeypatch, module, calls: list | None = None) -> None:
+    async def fake_set_audit_actor(_connection, user_id) -> None:
+        if calls is not None:
+            calls.append(user_id)
+
+    monkeypatch.setattr(module, "set_audit_actor", fake_set_audit_actor)
+
+
 class CreateProjectConnection:
     def __init__(self) -> None:
         self.project_id = uuid4()
@@ -170,6 +178,7 @@ def setting_row(stage_key: str, sort_order: int, dept: Department, due_days: int
 def test_create_project_seeds_first_stage_active_and_dates_it(monkeypatch) -> None:
     connection = CreateProjectConnection()
     patch_transaction(monkeypatch, projects, connection)
+    patch_audit_actor(monkeypatch, projects)
 
     blueprint = [
         StageTemplate(
@@ -232,6 +241,8 @@ def test_complete_stage_marks_done_and_activates_next_stage(monkeypatch) -> None
     connection = StageWorkflowConnection(current_stage=current, next_stage=next_stage)
 
     patch_transaction(monkeypatch, stages, connection)
+    audit_calls: list = []
+    patch_audit_actor(monkeypatch, stages, audit_calls)
 
     async def fake_due_days(_connection):
         return {"costing_revision_items": 5}
@@ -257,6 +268,7 @@ def test_complete_stage_marks_done_and_activates_next_stage(monkeypatch) -> None
     assert connection.execute_calls[0][1] == (current["id"], user.user_id)
     assert "SET status = 'active'" in connection.execute_calls[1][0]
     assert connection.execute_calls[1][1] == (next_stage["id"], 5)
+    assert audit_calls == [user.user_id]
 
 
 def test_complete_stage_rejects_wrong_department(monkeypatch) -> None:
@@ -266,6 +278,7 @@ def test_complete_stage_rejects_wrong_department(monkeypatch) -> None:
     )
     connection = StageWorkflowConnection(current_stage=current)
     patch_transaction(monkeypatch, stages, connection)
+    patch_audit_actor(monkeypatch, stages)
 
     with pytest.raises(HTTPException) as exc:
         run_async(
@@ -288,6 +301,7 @@ def test_non_admin_cannot_change_a_locked_due_date(monkeypatch) -> None:
     )
     connection = StageWorkflowConnection(current_stage=current)
     patch_transaction(monkeypatch, stages, connection)
+    patch_audit_actor(monkeypatch, stages)
 
     with pytest.raises(HTTPException) as exc:
         run_async(
@@ -308,6 +322,8 @@ def test_admin_can_override_a_due_date(monkeypatch) -> None:
     current = stage_row(due_date=date.today())
     connection = StageWorkflowConnection(current_stage=current)
     patch_transaction(monkeypatch, stages, connection)
+    audit_calls: list = []
+    patch_audit_actor(monkeypatch, stages, audit_calls)
 
     async def fake_load_project_detail(_connection, project_id):
         return {"project_id": str(project_id), "updated": True}
@@ -328,10 +344,13 @@ def test_admin_can_override_a_due_date(monkeypatch) -> None:
     assert connection.execute_calls == [
         ("UPDATE stages SET due_date = $2 WHERE id = $1", (current["id"], new_due_date))
     ]
+    assert audit_calls and audit_calls[0] is not None
 
 
-def test_comments_are_rejected_for_non_active_stages() -> None:
+def test_comments_are_rejected_for_non_active_stages(monkeypatch) -> None:
     pool = CommentPool(stage=stage_row(status=StageStatus.DONE.value))
+    patch_transaction(monkeypatch, comments, pool)
+    patch_audit_actor(monkeypatch, comments)
 
     with pytest.raises(HTTPException) as exc:
         run_async(
@@ -348,7 +367,7 @@ def test_comments_are_rejected_for_non_active_stages() -> None:
     assert len(pool.calls) == 1
 
 
-def test_comments_return_author_name_for_active_stages() -> None:
+def test_comments_return_author_name_for_active_stages(monkeypatch) -> None:
     user = make_user(Department.SALES)
     active_stage = stage_row(status=StageStatus.ACTIVE.value)
     inserted_comment = {
@@ -361,6 +380,9 @@ def test_comments_return_author_name_for_active_stages() -> None:
         "created_at": datetime.now(timezone.utc),
     }
     pool = CommentPool(stage=active_stage, inserted_comment=inserted_comment)
+    patch_transaction(monkeypatch, comments, pool)
+    audit_calls: list = []
+    patch_audit_actor(monkeypatch, comments, audit_calls)
 
     result = run_async(
         comments.add_comment(
@@ -375,11 +397,13 @@ def test_comments_return_author_name_for_active_stages() -> None:
     assert result.department == Department.SALES
     assert result.text == "Client approved the costing."
     assert len(pool.calls) == 2
+    assert audit_calls == [user.user_id]
 
 
 def test_workflow_settings_update_requires_every_stage_key(monkeypatch) -> None:
     connection = WorkflowSettingsConnection()
     patch_transaction(monkeypatch, workflow_settings, connection)
+    patch_audit_actor(monkeypatch, workflow_settings)
 
     initial_rows = [
         setting_row("stage_a", 10, Department.SALES, 1),
@@ -418,6 +442,8 @@ def test_workflow_settings_update_requires_every_stage_key(monkeypatch) -> None:
 def test_workflow_settings_update_rewrites_pending_stage_templates(monkeypatch) -> None:
     connection = WorkflowSettingsConnection()
     patch_transaction(monkeypatch, workflow_settings, connection)
+    audit_calls: list = []
+    patch_audit_actor(monkeypatch, workflow_settings, audit_calls)
 
     initial_rows = [
         setting_row("stage_a", 10, Department.SALES, 1),
@@ -468,3 +494,4 @@ def test_workflow_settings_update_rewrites_pending_stage_templates(monkeypatch) 
     assert [row.stage_key for row in result] == ["stage_a", "stage_b"]
     assert result[0].responsible_dept == Department.ADMIN
     assert result[0].default_due_days == 4
+    assert audit_calls and audit_calls[0] is not None

@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
+from uuid import UUID
 
 import asyncpg
 from fastapi import HTTPException, Request, status
@@ -33,6 +34,13 @@ async def get_pool(request: Request) -> asyncpg.Pool:
             detail="Database is not configured. Set DATABASE_URL before using the API.",
         )
     return pool
+
+
+async def set_audit_actor(connection: asyncpg.Connection, user_id: UUID | str | None) -> None:
+    if user_id is None:
+        return
+
+    await connection.execute("SELECT set_config('app.current_user_id', $1, true)", str(user_id))
 
 
 @asynccontextmanager
