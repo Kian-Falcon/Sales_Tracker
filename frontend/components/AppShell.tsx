@@ -18,6 +18,10 @@ function getPageLabel(pathname: string) {
     return "Workflow settings";
   }
 
+  if (pathname.startsWith("/reports")) {
+    return "Reports";
+  }
+
   if (pathname.startsWith("/dashboard")) {
     return "Dashboard";
   }

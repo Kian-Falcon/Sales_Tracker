@@ -20,7 +20,7 @@ from models.stage import StageTemplate
 from services.workflow_settings import load_stage_blueprint
 
 SOURCE_WORKFLOW = "legacy-placeholder-27"
-TARGET_WORKFLOW = "kian-falcon-24-stage-v1"
+TARGET_WORKFLOW = "kian-falcon-25-stage-v2"
 ACTIVE_STATUSES = {"active", "overdue"}
 
 LEGACY_STAGE_ORDER = [
@@ -459,7 +459,7 @@ async def migrate_project(connection: asyncpg.Connection, project: dict[str, Any
 
 
 async def main() -> None:
-    parser = argparse.ArgumentParser(description="Migrate legacy placeholder workflow projects to the real 24-stage blueprint.")
+    parser = argparse.ArgumentParser(description="Migrate legacy placeholder workflow projects to the real 25-stage blueprint.")
     parser.add_argument("--project-code", help="Migrate only one project code.")
     parser.add_argument(
         "--apply",

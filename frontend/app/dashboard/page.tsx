@@ -59,6 +59,14 @@ export default async function DashboardPage() {
         <div className="flex w-full flex-col gap-4 md:w-auto md:items-end">
           <div className="flex flex-wrap items-center gap-3 md:justify-end">
             <ExportButton />
+            {department === "Sales" || department === "Admin" ? (
+              <Link
+                href="/reports"
+                className="rounded-full border border-white/15 px-4 py-2 text-sm font-semibold text-white transition hover:border-gold hover:text-gold"
+              >
+                Reports
+              </Link>
+            ) : null}
             {department === "Admin" ? (
               <Link
                 href="/settings/workflow"
@@ -86,7 +94,7 @@ export default async function DashboardPage() {
 
       {error ? <p className="rounded-2xl bg-gold/20 px-4 py-3 text-sm text-ink">{error}</p> : null}
 
-      <ProjectTable projects={projects} />
+      <ProjectTable projects={projects} canDeleteProjects={department === "Admin"} />
     </div>
   );
 }

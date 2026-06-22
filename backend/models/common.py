@@ -15,6 +15,16 @@ class Department(str, Enum):
     ADMIN = "Admin"
 
 
+class ProjectPriority(str, Enum):
+    NORMAL = "normal"
+    ACCELERATED = "accelerated"
+
+
+class ProjectDocumentType(str, Enum):
+    BOQ = "boq"
+    ATTACHMENT = "attachment"
+
+
 class StagePhase(str, Enum):
     COSTING = "costing"
     DRAWING = "drawing"
@@ -27,6 +37,12 @@ class StageStatus(str, Enum):
     ACTIVE = "active"
     OVERDUE = "overdue"
     DONE = "done"
+
+
+class DueDateRequestStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
 
 
 class CurrentUser(BaseModel):

@@ -1,9 +1,10 @@
 import Link from "next/link";
 
 import { PipelineView } from "@/components/PipelineView";
+import { ProjectDocumentsPanel } from "@/components/ProjectDocumentsPanel";
+import { ProjectOverviewPanel } from "@/components/ProjectOverviewPanel";
 import { getProject } from "@/lib/api";
 import { getServerAuth } from "@/lib/supabase-server";
-import { formatDate } from "@/lib/utils";
 
 async function loadProject(id: string) {
   try {
@@ -25,9 +26,11 @@ async function loadProject(id: string) {
 }
 
 export default async function ProjectDetailPage({
-  params
+  params,
+  searchParams
 }: {
   params: { id: string };
+  searchParams?: { upload?: string };
 }) {
   const { project, department, error } = await loadProject(params.id);
 
@@ -50,24 +53,20 @@ export default async function ProjectDetailPage({
         Back to dashboard
       </Link>
 
-      <section className="rounded-[32px] bg-white p-8 shadow-panel">
-        <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-          <div className="space-y-3">
-            <span className="inline-flex rounded-full bg-sand px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-ink/70">
-              {project.project_code}
-            </span>
-            <div>
-              <h1 className="text-4xl font-semibold text-ink">{project.name}</h1>
-              <p className="text-sm text-ink/60">
-                {project.client}
-                {project.brand ? ` - ${project.brand}` : ""}
-              </p>
-            </div>
-          </div>
+      {searchParams?.upload === "failed" ? (
+        <p className="rounded-2xl bg-gold/20 px-4 py-3 text-sm text-ink">
+          Project created successfully, but the BOQ upload did not finish. You can upload it from the documents panel
+          below.
+        </p>
+      ) : null}
 
-          <div className="text-sm text-ink/55">Created {formatDate(project.created_at)}</div>
-        </div>
-      </section>
+      <ProjectOverviewPanel project={project} viewerDepartment={department} />
+
+      <ProjectDocumentsPanel
+        projectId={project.id}
+        documents={project.documents}
+        viewerDepartment={department}
+      />
 
       <PipelineView project={project} viewerDepartment={department} />
     </div>

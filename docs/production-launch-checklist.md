@@ -14,6 +14,8 @@ This runbook turns the original tracker brief into a practical ship-week plan.
 - [ ] Configure the real Resend sender and real escalation recipients.
 - [ ] Enable the scheduler in production with `ENABLE_SCHEDULER=true`.
 - [ ] Validate one real overdue-stage email from production end to end.
+- [ ] Validate one real stage-reminder email from production end to end.
+- [ ] Validate one real next-stage handoff email from production end to end.
 - [ ] Run the backend regression suite: `cd backend && pytest tests/ -v`.
 - [ ] Run the frontend verification suite: `cd frontend && npm run lint && npm run type-check && npm run build`.
 - [ ] Run one full cross-department smoke test with a fresh project in production or staging.
@@ -47,11 +49,12 @@ This runbook turns the original tracker brief into a practical ship-week plan.
 
 ### Backend / Render Owner
 
-- [ ] Set `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_JWKS_URL`, `RESEND_API_KEY`, `FRONTEND_URL`, `ALLOWED_ORIGINS`, `DEFAULT_ALERT_RECIPIENTS`, and `ENABLE_SCHEDULER`.
+- [ ] Set `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_JWKS_URL`, `RESEND_API_KEY`, `FRONTEND_URL`, `ALLOWED_ORIGINS`, `DEFAULT_ALERT_RECIPIENTS`, `STAGE_REMINDER_OFFSETS_DAYS`, and `ENABLE_SCHEDULER`.
 - [ ] Confirm the Render start command matches the brief: `uvicorn main:app --host 0.0.0.0 --port $PORT`.
 - [ ] Verify `/health`, `/api/v1/projects`, `/api/v1/dashboard/summary`, `/api/v1/projects/export/csv`, and `/api/v1/workflow-settings` on the deployed backend.
 - [ ] Run backend tests before deployment and confirm GitHub Actions passes.
-- [ ] Validate scheduler execution and Resend delivery logs.
+- [ ] Validate scheduler execution and Resend delivery logs for both overdue alerts and stage reminders.
+- [ ] Validate one handoff email after marking a stage complete and confirm the timing label is correct.
 - [ ] Confirm audit log rows are written on stage changes.
 - [ ] Implement rate limiting on POST/PATCH endpoints or explicitly accept that risk before go-live.
 
@@ -74,12 +77,12 @@ This runbook turns the original tracker brief into a practical ship-week plan.
 
 ### QA / Business Owner
 
-- [ ] Approve the final 24-stage workflow order and names.
+- [ ] Approve the final 25-stage workflow order and names.
 - [ ] Approve the final SLA days in `/settings/workflow`.
 - [ ] Verify Sales can create projects and monitor all active work.
 - [ ] Verify each department can only complete its own stages.
 - [ ] Verify comments are locked after submission and show the correct author / department.
-- [ ] Verify date locking works: Sales or stage owner can set the first due date, only Admin can change an existing one.
+- [ ] Verify date locking works: only Sales/Admin can set due dates directly, and other departments must use the request-and-approval flow.
 - [ ] Verify one overdue escalation email reaches the intended stakeholders.
 - [ ] Sign off go / no-go.
 
@@ -87,8 +90,10 @@ This runbook turns the original tracker brief into a practical ship-week plan.
 
 These items are already in place and do not need fresh development before launch:
 
-- The real 24-stage workflow is implemented.
+- The real 25-stage workflow is implemented.
 - Dashboard, project detail, comments, export, workflow settings, pagination, and status / ETA columns are built.
+- Due-date request and Sales/Admin approval flow are built.
+- Next-stage handoff email is built.
 - Backend tests cover health plus key workflow rules.
 - Frontend lint, type-check, and production build pass.
 - CI workflows exist for backend and frontend.
@@ -105,7 +110,7 @@ These items are still not doc-complete and should be treated as launch decisions
 Launch only if all of the following are true:
 
 - Login works for every department role.
-- A new project seeds the real 24-stage workflow.
+- A new project seeds the real 25-stage workflow.
 - Stage completion advances the next stage correctly.
 - Comments, due-date locking, dashboard filters, pagination, and export behave correctly.
 - Frontend production build passes.

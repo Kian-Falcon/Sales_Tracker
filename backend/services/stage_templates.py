@@ -7,6 +7,7 @@ from models.stage import StageTemplate
 # These windows are implementation defaults and can be tuned later without changing stage order.
 DEFAULT_STAGE_BLUEPRINT: list[StageTemplate] = [
     StageTemplate(stage_key="costing_sop_logged", phase=StagePhase.COSTING, name="Costing SOP Logged In", responsible_dept=Department.SALES, sort_order=10, default_due_days=1),
+    StageTemplate(stage_key="costing_bom_prepared", phase=StagePhase.COSTING, name="BOM Prepared by R&D", responsible_dept=Department.RD, sort_order=15, default_due_days=2),
     StageTemplate(stage_key="costing_shared_rd", phase=StagePhase.COSTING, name="Costing Shared by R&D", responsible_dept=Department.RD, sort_order=20, default_due_days=3),
     StageTemplate(stage_key="costing_revision_items", phase=StagePhase.COSTING, name="Costing Revision / Additional Items", responsible_dept=Department.RD, sort_order=30, default_due_days=3),
     StageTemplate(stage_key="costing_client_approved", phase=StagePhase.COSTING, name="Costing Approved by Client", responsible_dept=Department.SALES, sort_order=40, default_due_days=2),

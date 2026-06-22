@@ -2,8 +2,12 @@ import { createBrowserSupabaseClient } from "@/lib/supabase";
 import type {
   Comment,
   DashboardSummary,
+  MentionableUser,
+  MonthlyReport,
   ProjectCreateInput,
   ProjectDetail,
+  ProjectDocument,
+  ProjectMetadataUpdateInput,
   ProjectSummary,
   WorkflowStageSetting,
   WorkflowStageSettingUpdateInput
@@ -63,10 +67,13 @@ async function apiFetch<T>(
   accessToken?: string
 ): Promise<T> {
   const token = accessToken ?? (await getBrowserAccessToken());
+  const isFormData =
+    typeof FormData !== "undefined" && typeof init.body !== "undefined" && init.body instanceof FormData;
+
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     ...init,
     headers: {
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init.headers ?? {})
     },
@@ -75,6 +82,10 @@ async function apiFetch<T>(
 
   if (!response.ok) {
     throw new Error(await getApiErrorMessage(response));
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
   }
 
   const contentType = response.headers.get("content-type") ?? "";
@@ -93,8 +104,38 @@ export function getProject(projectId: string, accessToken?: string) {
   return apiFetch<ProjectDetail>(`/api/v1/projects/${projectId}`, {}, accessToken);
 }
 
+export function updateProjectMetadata(
+  projectId: string,
+  input: ProjectMetadataUpdateInput,
+  accessToken?: string
+) {
+  return apiFetch<ProjectDetail>(
+    `/api/v1/projects/${projectId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(input)
+    },
+    accessToken
+  );
+}
+
+export function deleteProject(projectId: string, accessToken?: string) {
+  return apiFetch<void>(
+    `/api/v1/projects/${projectId}`,
+    {
+      method: "DELETE"
+    },
+    accessToken
+  );
+}
+
 export function getDashboardSummary(accessToken?: string) {
   return apiFetch<DashboardSummary>("/api/v1/dashboard/summary", {}, accessToken);
+}
+
+export function getMonthlyReport(month?: string, accessToken?: string) {
+  const query = month ? `?month=${encodeURIComponent(month)}` : "";
+  return apiFetch<MonthlyReport>(`/api/v1/reports/monthly${query}`, {}, accessToken);
 }
 
 export function listWorkflowSettings(accessToken?: string) {
@@ -126,6 +167,26 @@ export function createProject(input: ProjectCreateInput, accessToken?: string) {
   );
 }
 
+export function uploadProjectDocument(
+  projectId: string,
+  file: File,
+  documentType: "boq" | "attachment" = "boq",
+  accessToken?: string
+) {
+  const formData = new FormData();
+  formData.append("document_type", documentType);
+  formData.append("file", file);
+
+  return apiFetch<ProjectDocument>(
+    `/api/v1/projects/${projectId}/documents`,
+    {
+      method: "POST",
+      body: formData
+    },
+    accessToken
+  );
+}
+
 export function completeStage(stageId: string, accessToken?: string) {
   return apiFetch<ProjectDetail>(
     `/api/v1/stages/${stageId}/complete`,
@@ -147,6 +208,37 @@ export function setStageDueDate(stageId: string, dueDate: string, accessToken?: 
   );
 }
 
+export function requestStageDueDateChange(
+  stageId: string,
+  input: { requested_due_date: string; reason: string },
+  accessToken?: string
+) {
+  return apiFetch<ProjectDetail>(
+    `/api/v1/stages/${stageId}/due-date-requests`,
+    {
+      method: "POST",
+      body: JSON.stringify(input)
+    },
+    accessToken
+  );
+}
+
+export function reviewStageDueDateRequest(
+  stageId: string,
+  requestId: string,
+  input: { action: "approve" | "reject"; note?: string | null },
+  accessToken?: string
+) {
+  return apiFetch<ProjectDetail>(
+    `/api/v1/stages/${stageId}/due-date-requests/${requestId}/review`,
+    {
+      method: "POST",
+      body: JSON.stringify(input)
+    },
+    accessToken
+  );
+}
+
 export function createComment(stageId: string, text: string, accessToken?: string) {
   return apiFetch<Comment>(
     `/api/v1/stages/${stageId}/comments`,
@@ -158,9 +250,28 @@ export function createComment(stageId: string, text: string, accessToken?: strin
   );
 }
 
+export function listStageMentionableUsers(stageId: string, accessToken?: string) {
+  return apiFetch<MentionableUser[]>(`/api/v1/stages/${stageId}/mentionable-users`, {}, accessToken);
+}
+
 export async function downloadProjectsCsv(accessToken?: string) {
   const token = accessToken ?? (await getBrowserAccessToken());
   const response = await fetch(`${getApiBaseUrl()}/api/v1/projects/export/csv`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(await getApiErrorMessage(response));
+  }
+
+  return response.blob();
+}
+
+export async function downloadMonthlyReportCsv(month?: string, accessToken?: string) {
+  const token = accessToken ?? (await getBrowserAccessToken());
+  const query = month ? `?month=${encodeURIComponent(month)}` : "";
+  const response = await fetch(`${getApiBaseUrl()}/api/v1/reports/monthly/export/csv${query}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     cache: "no-store"
   });

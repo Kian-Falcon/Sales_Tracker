@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
 from database import close_pool, create_pool
-from routers import comments, dashboard, health, projects, stages, workflow_settings
+from routers import comments, dashboard, health, projects, reports, stages, workflow_settings
 from services.scheduler import build_scheduler
 
 
@@ -48,4 +48,5 @@ app.include_router(projects.router)
 app.include_router(stages.router)
 app.include_router(comments.router)
 app.include_router(dashboard.router)
+app.include_router(reports.router)
 app.include_router(workflow_settings.router)

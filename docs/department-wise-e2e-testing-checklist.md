@@ -1,6 +1,6 @@
 # Department-Wise End-to-End Testing Checklist
 
-Use this checklist for staging or production smoke testing before go-live. It matches the current 24-stage workflow implemented in `backend/services/stage_templates.py`.
+Use this checklist for staging or production smoke testing before go-live. It matches the current 25-stage workflow implemented in `backend/services/stage_templates.py`.
 
 ## Test Setup
 
@@ -25,10 +25,10 @@ Use this checklist for staging or production smoke testing before go-live. It ma
 ## Admin Checklist
 
 - [ ] Log in as Admin and verify access to dashboard, project detail, workflow settings, export, and profile actions.
-- [ ] Open `/settings/workflow` and verify all 24 stages are listed in the correct order.
+- [ ] Open `/settings/workflow` and verify all 25 stages are listed in the correct order.
 - [ ] Change one stage owner and one SLA day, save, and confirm the change persists.
 - [ ] Create a fresh test project after the settings change and confirm the new workflow settings apply.
-- [ ] Open an existing project and verify Admin can edit a locked due date.
+- [ ] Open an existing project and verify Admin can edit a due date directly.
 - [ ] Confirm Admin can complete any stage only if the business has approved this behavior; otherwise verify visibility-only access where expected.
 - [ ] Verify Admin can export CSV successfully.
 - [ ] Verify Admin can trigger the full audit trail for stage completion, due-date change, and comments, then confirm it in Supabase SQL until a dedicated audit UI is added.
@@ -39,12 +39,13 @@ Use this checklist for staging or production smoke testing before go-live. It ma
 
 - [ ] Create a new project with client, brand, and required identifying fields.
 - [ ] Confirm project appears on the dashboard immediately.
-- [ ] Confirm the project seeds the full 24-stage workflow.
+- [ ] Confirm the project seeds the full 25-stage workflow.
 - [ ] Confirm the first active stage is `Costing SOP Logged In`.
 
 ### Sales-Owned Stages
 
 - [ ] Complete `Costing SOP Logged In`.
+- [ ] Confirm the next stage team receives a handoff email after `Costing SOP Logged In` is completed.
 - [ ] Complete `Costing Approved by Client`.
 - [ ] Complete `Drawing SOP Logged In`.
 - [ ] Complete `Drawings Shared with Client`.
@@ -66,6 +67,7 @@ Use this checklist for staging or production smoke testing before go-live. It ma
 
 - [ ] Verify R&D cannot create projects unless intentionally allowed.
 - [ ] Open the Sales-created test project and confirm the first R&D stage activates only after the preceding Sales stage is completed.
+- [ ] Complete `BOM Prepared by R&D`.
 - [ ] Complete `Costing Shared by R&D`.
 - [ ] Complete `Costing Revision / Additional Items`.
 - [ ] Complete `Drawings Prepared by R&D`.
@@ -76,6 +78,7 @@ Use this checklist for staging or production smoke testing before go-live. It ma
 - [ ] Complete `Revised Samples Completed`.
 - [ ] Add comments on at least two stages and verify they remain visible and locked.
 - [ ] Confirm the next stage activates automatically after each completion.
+- [ ] Confirm at least one handoff email reaches the next department with the correct before-time / on-time / after-time label.
 
 ## Production Checklist
 
@@ -112,12 +115,14 @@ Use this checklist for staging or production smoke testing before go-live. It ma
 
 ## Due Date And Overdue Checks
 
-- [ ] Confirm the first due date can be set by Sales, Admin, or the current stage owner.
-- [ ] Confirm a non-Admin cannot edit a due date once it has already been set.
-- [ ] Confirm Admin can edit an existing due date.
+- [ ] Confirm Sales can set or update a due date directly from the stage card.
+- [ ] Confirm a non-Sales department user cannot edit the due date directly.
+- [ ] Confirm a non-Sales department user can raise a due-date change request with a reason.
+- [ ] Confirm Sales or Admin can approve or reject the request inline.
 - [ ] Force one active stage into the past and confirm it becomes `overdue`.
 - [ ] Confirm overdue-only dashboard filters pick it up.
 - [ ] Confirm one overdue email alert is sent to the intended recipients.
+- [ ] Configure one active stage to hit a reminder window and confirm the scheduled reminder email is sent to the responsible department plus Sales/Admin.
 
 ## Export And Reporting Checks
 
@@ -145,6 +150,6 @@ Use this checklist for staging or production smoke testing before go-live. It ma
 
 ## Suggested UAT Test Projects
 
-- `UAT-SALES-001`: Standard happy path through all 24 stages.
+- `UAT-SALES-001`: Standard happy path through all 25 stages.
 - `UAT-REVISION-001`: Includes costing, drawing, and sample revision loops.
 - `UAT-OVERDUE-001`: Used only for overdue-date and alert testing.

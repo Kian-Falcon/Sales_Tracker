@@ -18,7 +18,7 @@ Scaffolded from the June 2026 "Workflow Tracker Architecture & Build Document".
 
 ### Due dates & overdue detection
 
-Each stage template carries a `default_due_days` window. The active stage is given a `due_date` on project creation, and every following stage is dated when it becomes active (on stage completion). Sales/Admin or the owning department can set the first date, but once a date is scheduled only `Admin` can change it via `PATCH /api/v1/stages/{id}/due-date` or the date control on the project detail page. The APScheduler job that flips past-due stages to `overdue` and emails alerts only runs when `ENABLE_SCHEDULER=true` (left `false` for local dev in `.env.example`).
+Each stage template carries a `default_due_days` window. The active stage is given a `due_date` on project creation, and every following stage is dated when it becomes active (on stage completion). Only `Sales` or `Admin` can set or update due dates directly via `PATCH /api/v1/stages/{id}/due-date`. Other departments now raise due-date change requests from the project detail page, and Sales/Admin can approve or reject those requests inline. When a stage is completed, the next stage's owning department receives a handoff email that states whether the previous stage finished before time, on time, or after time. The APScheduler flow also sends stage deadline reminders using `STAGE_REMINDER_OFFSETS_DAYS` (default `7,3,1`) and flips past-due stages to `overdue`. Scheduler jobs only run when `ENABLE_SCHEDULER=true` (left `false` for local dev in `.env.example`).
 
 ### Workflow settings
 
@@ -28,7 +28,7 @@ Admins can tune per-stage responsible departments and default SLA days from `/se
 
 The brief leaves three implementation gaps, so this scaffold makes the following temporary choices:
 
-1. The clarified business workflow is now encoded as 24 real stages in `backend/services/stage_templates.py`, but the default due-day windows are still operational assumptions that should be tuned with the team.
+1. The clarified business workflow is now encoded as 25 real stages in `backend/services/stage_templates.py`, but the default due-day windows are still operational assumptions that should be tuned with the team.
 2. `notifications_log` is referenced by the scheduler flow, but no schema is provided. The scaffold adds that table in `backend/migrations/005_audit_log.sql`.
 3. The schema only allows phases `costing`, `drawing`, `sampling`, and `production`, while the overview also mentions QC and Dispatch. The scaffold keeps QC and Dispatch as responsible departments within those four phases until the taxonomy is confirmed.
 4. The brief never provisions `public.profiles` rows for Supabase Auth users, but `projects.created_by` references `profiles(id)`. `backend/migrations/007_profile_sync.sql` adds an `auth.users` trigger (plus a backfill) that creates/syncs a profile from `user_metadata` so project creation does not fail on the foreign key. A missing/invalid `department` in metadata falls back to `Sales`.

@@ -64,6 +64,17 @@ function WorkflowIcon({ className }: IconProps) {
   );
 }
 
+function ReportsIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
+      <path d="M4.5 19.5h15" />
+      <path d="M7.5 16V10.5" />
+      <path d="M12 16V6.5" />
+      <path d="M16.5 16V12.5" />
+    </svg>
+  );
+}
+
 function ChevronLeftIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
@@ -215,6 +226,15 @@ export function UserSidebar({
         icon: NewProjectIcon
       }
     ];
+
+    if (viewer?.department === "Sales" || viewer?.department === "Admin") {
+      items.push({
+        href: "/reports",
+        label: "Reports",
+        description: "Monthly audit and trend view",
+        icon: ReportsIcon
+      });
+    }
 
     if (viewer?.department === "Admin") {
       items.push({
