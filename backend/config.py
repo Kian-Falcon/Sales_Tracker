@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     project_documents_signed_url_ttl_seconds: int = 3600
     project_documents_max_bytes: int = 10 * 1024 * 1024
     resend_api_key: str | None = None
+    email_from_address: str = "alert@kianfalcon.com"
+    email_from_name: str = "Workflow Tracker"
     frontend_url: str = "http://localhost:3000"
     enable_scheduler: bool = False
 
@@ -59,6 +61,10 @@ class Settings(BaseSettings):
     @property
     def stage_reminder_offsets(self) -> list[int]:
         return _split_csv_ints(self.stage_reminder_offsets_raw)
+
+    @property
+    def email_from(self) -> str:
+        return f"{self.email_from_name} <{self.email_from_address}>"
 
 
 @lru_cache

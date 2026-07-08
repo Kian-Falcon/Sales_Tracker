@@ -50,7 +50,7 @@ class NotificationService:
 
         resend.Emails.send(
             {
-                "from": "Workflow Tracker <alerts@kianfalcon.com>",
+                "from": self._settings.email_from,
                 "to": recipients,
                 "subject": f"[OVERDUE] {project_name} - {stage_name}",
                 "html": (
@@ -103,7 +103,7 @@ class NotificationService:
 
         resend.Emails.send(
             {
-                "from": "Workflow Tracker <alerts@kianfalcon.com>",
+                "from": self._settings.email_from,
                 "to": recipients,
                 "subject": f"[NEW PROJECT] {project_code} - {project_name}",
                 "html": (
@@ -158,7 +158,7 @@ class NotificationService:
 
         resend.Emails.send(
             {
-                "from": "Workflow Tracker <alerts@kianfalcon.com>",
+                "from": self._settings.email_from,
                 "to": recipients,
                 "subject": f"[DUE DATE REQUEST] {project_code} - {stage_name}",
                 "html": (
@@ -211,7 +211,7 @@ class NotificationService:
 
         resend.Emails.send(
             {
-                "from": "Workflow Tracker <alerts@kianfalcon.com>",
+                "from": self._settings.email_from,
                 "to": recipients,
                 "subject": f"[DUE DATE {decision.upper()}] {project_code} - {stage_name}",
                 "html": (
@@ -264,7 +264,7 @@ class NotificationService:
 
         resend.Emails.send(
             {
-                "from": "Workflow Tracker <alerts@kianfalcon.com>",
+                "from": self._settings.email_from,
                 "to": recipients,
                 "subject": f"[REMINDER] {project_code} - {stage_name} due in {reminder_label}",
                 "html": (
@@ -317,7 +317,7 @@ class NotificationService:
 
         resend.Emails.send(
             {
-                "from": "Workflow Tracker <alerts@kianfalcon.com>",
+                "from": self._settings.email_from,
                 "to": recipients,
                 "subject": f"[HANDOFF] {project_code} - {next_stage_name} ({handoff_label})",
                 "html": (
@@ -370,7 +370,7 @@ class NotificationService:
 
         resend.Emails.send(
             {
-                "from": "Workflow Tracker <alerts@kianfalcon.com>",
+                "from": self._settings.email_from,
                 "to": recipients,
                 "subject": f"[MENTION] {project_code} - {stage_name}",
                 "html": (
