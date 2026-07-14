@@ -453,6 +453,7 @@ class ProjectDetailConnection:
         self.project_id = project_id
         self.sales_stage_id = uuid4()
         self.rd_stage_id = uuid4()
+        self.future_stage_id = uuid4()
         self.project_row = {
             "id": project_id,
             "project_code": "P0099",
@@ -497,6 +498,20 @@ class ProjectDetailConnection:
                 "sort_order": 20,
                 "activated_at": datetime.now(timezone.utc),
                 "due_date": date.today() + timedelta(days=2),
+                "completed_at": None,
+                "completed_by": None,
+            },
+            {
+                "id": self.future_stage_id,
+                "project_id": project_id,
+                "stage_key": "sample_development_started_rd",
+                "phase": StagePhase.SAMPLING.value,
+                "name": "Sample Development Started by R&D",
+                "responsible_dept": Department.RD.value,
+                "status": StageStatus.PENDING.value,
+                "sort_order": 30,
+                "activated_at": None,
+                "due_date": None,
                 "completed_at": None,
                 "completed_by": None,
             },
@@ -750,14 +765,12 @@ def test_create_project_seeds_first_stage_active_and_dates_it(monkeypatch) -> No
             "project_code": "P0001",
             "project_name": "Chair Program",
             "client": "Acme",
-            "brand": "Kian",
             "assigned_person_name": "Nirvaan Sawhney",
             "priority": "accelerated",
             "created_by_name": "Sales Lead",
             "created_by_department": Department.SALES.value,
             "estimated_tat_days": 21,
-            "total_order_value": 125000,
-            "number_of_stores": 48,
+            "total_order_value": 125000.0,
             "special_request": "Complete sampling before festive launch.",
             "current_stage_name": "Costing SOP Logged In",
             "recipients": ["sales@example.com", "rd@example.com"],
@@ -1554,6 +1567,26 @@ def test_department_users_only_receive_their_own_stages_in_project_detail() -> N
     assert detail.stages[0].responsible_dept == Department.RD
     assert len(detail.stages[0].comments) == 1
     assert detail.stages[0].comments[0].text == "RD-only note"
+
+
+def test_sales_users_only_receive_revealed_stages_in_project_detail() -> None:
+    project_id = uuid4()
+    connection = ProjectDetailConnection(project_id)
+
+    detail = run_async(
+        projects.load_project_detail(
+            connection,
+            project_id,
+            viewer_department=Department.SALES,
+        )
+    )
+
+    assert len(detail.stages) == 2
+    assert [stage.stage_key for stage in detail.stages] == [
+        "costing_sop_logged",
+        "costing_shared_rd",
+    ]
+    assert all(stage.status != StageStatus.PENDING for stage in detail.stages)
 
 
 def test_delete_project_cleans_up_audit_rows_and_storage_objects(monkeypatch) -> None:

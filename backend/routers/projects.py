@@ -199,6 +199,11 @@ async def load_project_detail(
             for stage in stage_rows
             if stage["responsible_dept"] == viewer_department.value
         ]
+    stage_rows = [
+        stage
+        for stage in stage_rows
+        if stage["status"] != "pending"
+    ]
 
     visible_stage_ids = [stage["id"] for stage in stage_rows]
     comment_rows: list[dict] = []
@@ -454,14 +459,12 @@ async def create_project(
             "project_code": project_dict["project_code"],
             "project_name": project_dict["name"],
             "client": project_dict["client"],
-            "brand": project_dict.get("brand"),
             "assigned_person_name": project_dict.get("assigned_person_name"),
             "priority": project_dict["priority"],
             "created_by_name": creator_name or "Workflow user",
             "created_by_department": creator_department.value,
             "estimated_tat_days": project_dict["estimated_tat_days"],
             "total_order_value": project_dict["total_order_value"],
-            "number_of_stores": project_dict["number_of_stores"],
             "special_request": project_dict.get("special_request"),
             "current_stage_name": first_stage_name,
             "recipients": recipients,
@@ -774,12 +777,10 @@ async def export_projects_csv(
             "project_code",
             "project_name",
             "client",
-            "brand",
             "assigned_person_name",
             "priority",
             "estimated_tat_days",
             "total_order_value",
-            "number_of_stores",
             "project_status",
             "current_stage",
             "current_phase",
@@ -800,14 +801,12 @@ async def export_projects_csv(
                 "project_code": normalized["project_code"],
                 "project_name": normalized["project_name"],
                 "client": normalized["client"],
-                "brand": normalized["brand"] or "",
                 "assigned_person_name": normalized["assigned_person_name"] or "",
                 "priority": normalized["priority"].title(),
                 "estimated_tat_days": normalized["estimated_tat_days"] or "",
                 "total_order_value": f"{normalized['total_order_value']:.2f}"
                 if normalized["total_order_value"] is not None
                 else "",
-                "number_of_stores": normalized["number_of_stores"] or "",
                 "project_status": _project_status_label(normalized["current_stage_status"]),
                 "current_stage": normalized["current_stage_name"] or "",
                 "current_phase": normalized["current_stage_phase"].title() if normalized["current_stage_phase"] else "",

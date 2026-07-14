@@ -12,7 +12,6 @@ type FormState = {
   priority: ProjectPriority;
   estimated_tat_days: string;
   total_order_value: string;
-  number_of_stores: string;
   special_request: string;
 };
 
@@ -27,10 +26,6 @@ function buildFormState(project: ProjectDetail): FormState {
     total_order_value:
       project.total_order_value !== null && project.total_order_value !== undefined
         ? String(project.total_order_value)
-        : "",
-    number_of_stores:
-      project.number_of_stores !== null && project.number_of_stores !== undefined
-        ? String(project.number_of_stores)
         : "",
     special_request: project.special_request ?? ""
   };
@@ -87,7 +82,6 @@ export function ProjectOverviewPanel({
             priority: form.priority,
             estimated_tat_days: form.estimated_tat_days ? Number(form.estimated_tat_days) : null,
             total_order_value: form.total_order_value ? Number(form.total_order_value) : null,
-            number_of_stores: form.number_of_stores ? Number(form.number_of_stores) : null,
             special_request: form.special_request.trim() || null
           });
 
@@ -121,10 +115,7 @@ export function ProjectOverviewPanel({
           </div>
           <div>
             <h1 className="text-4xl font-semibold text-ink">{project.name}</h1>
-            <p className="text-sm text-ink/60">
-              {project.client}
-              {project.brand ? ` - ${project.brand}` : ""}
-            </p>
+            <p className="text-sm text-ink/60">{project.client}</p>
             <p className="mt-2 text-sm text-ink/50">
               Created by {project.created_by_name ?? "Workflow user"}
               {project.created_by_department ? ` | ${project.created_by_department}` : ""}
@@ -165,11 +156,6 @@ export function ProjectOverviewPanel({
           value={formatCurrency(project.total_order_value)}
           muted={project.total_order_value === null || project.total_order_value === undefined}
         />
-        <DetailCard
-          label="Number of stores"
-          value={project.number_of_stores ? String(project.number_of_stores) : "Not set"}
-          muted={!project.number_of_stores}
-        />
         <DetailCard label="Priority" value={formatPriority(project.priority)} />
       </div>
 
@@ -190,8 +176,8 @@ export function ProjectOverviewPanel({
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-pine">Project intake details</p>
               <h2 className="mt-2 text-2xl font-semibold text-ink">Fill or revise the missing values</h2>
               <p className="mt-2 max-w-2xl text-sm text-ink/60">
-                Keep the assigned owner, TAT, order value, store count, and any special instruction current for the
-                teams following this project.
+                Keep the assigned owner, TAT, order value, and any special instruction current for the teams
+                following this project.
               </p>
             </div>
           </div>
@@ -237,17 +223,6 @@ export function ProjectOverviewPanel({
               step="0.01"
               inputMode="decimal"
               min={0}
-            />
-
-            <Field
-              label="Number of stores"
-              value={form.number_of_stores}
-              onChange={(value) => updateField("number_of_stores", value)}
-              placeholder="48"
-              required={false}
-              type="number"
-              inputMode="numeric"
-              min={1}
             />
 
             <label className="block space-y-2 lg:col-span-2">

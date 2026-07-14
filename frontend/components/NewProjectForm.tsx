@@ -9,12 +9,10 @@ import type { ProjectPriority, ViewerDetails } from "@/lib/types";
 type FormState = {
   name: string;
   client: string;
-  brand: string;
   assigned_person_name: string;
   priority: ProjectPriority;
   estimated_tat_days: string;
   total_order_value: string;
-  number_of_stores: string;
   special_request: string;
 };
 
@@ -27,12 +25,10 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
   const [form, setForm] = useState<FormState>({
     name: "",
     client: "",
-    brand: "",
     assigned_person_name: viewer?.fullName ?? "",
     priority: "normal",
     estimated_tat_days: "",
     total_order_value: "",
-    number_of_stores: "",
     special_request: ""
   });
   const [boqFile, setBoqFile] = useState<File | null>(null);
@@ -58,12 +54,10 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
           const project = await createProject({
             name: form.name.trim(),
             client: form.client.trim(),
-            brand: form.brand.trim() || undefined,
             assigned_person_name: form.assigned_person_name.trim(),
             priority: form.priority,
             estimated_tat_days: Number(form.estimated_tat_days),
             total_order_value: Number(form.total_order_value),
-            number_of_stores: form.number_of_stores ? Number(form.number_of_stores) : null,
             special_request: form.special_request.trim() || undefined
           });
 
@@ -113,13 +107,6 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
           placeholder="Acme Retail"
         />
         <Field
-          label="Brand"
-          value={form.brand}
-          onChange={(value) => updateField("brand", value)}
-          placeholder="Optional"
-          required={false}
-        />
-        <Field
           label="Assigned person"
           value={form.assigned_person_name}
           onChange={(value) => updateField("assigned_person_name", value)}
@@ -156,16 +143,6 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
           step="0.01"
           inputMode="decimal"
           min={0}
-        />
-        <Field
-          label="Number of stores"
-          value={form.number_of_stores}
-          onChange={(value) => updateField("number_of_stores", value)}
-          placeholder="48"
-          type="number"
-          inputMode="numeric"
-          min={1}
-          required={false}
         />
 
         <label className="block space-y-2 lg:col-span-2">

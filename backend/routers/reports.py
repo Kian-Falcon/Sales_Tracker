@@ -639,7 +639,6 @@ async def export_monthly_report_csv(
     csv_writer.writerow(["Overdue events", report.overview.overdue_events])
     csv_writer.writerow(["Comments logged", report.overview.comments_logged])
     csv_writer.writerow(["Total pipeline value", report.overview.total_pipeline_value])
-    csv_writer.writerow(["Stores in scope", report.overview.stores_in_scope])
     csv_writer.writerow([])
 
     csv_writer.writerow(["Departments"])
@@ -680,11 +679,9 @@ async def export_monthly_report_csv(
             "project_code",
             "project_name",
             "client",
-            "brand",
             "priority",
             "assigned_person_name",
             "total_order_value",
-            "number_of_stores",
             "status_label",
             "current_stage_name",
             "current_stage_department",
@@ -707,11 +704,9 @@ async def export_monthly_report_csv(
                 project.project_code,
                 project.project_name,
                 project.client,
-                project.brand,
                 project.priority.value,
                 project.assigned_person_name,
                 project.total_order_value,
-                project.number_of_stores,
                 project.status_label,
                 project.current_stage_name,
                 project.current_stage_department.value if project.current_stage_department else None,

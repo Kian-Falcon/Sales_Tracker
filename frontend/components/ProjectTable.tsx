@@ -179,7 +179,6 @@ export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTab
   const router = useRouter();
   const [projectRows, setProjectRows] = useState(projects);
   const [clientFilter, setClientFilter] = useState("all");
-  const [brandFilter, setBrandFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<ProjectStatusFilter>("all");
   const [departmentFilter, setDepartmentFilter] = useState("all");
   const [delayedOnly, setDelayedOnly] = useState(false);
@@ -213,13 +212,6 @@ export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTab
   const clients = Array.from(new Set(projectRows.map((project) => project.client))).sort((a, b) =>
     a.localeCompare(b)
   );
-  const brands = Array.from(
-    new Set(
-      projectRows
-        .map((project) => project.brand)
-        .filter((brand): brand is string => Boolean(brand))
-    )
-  ).sort((a, b) => a.localeCompare(b));
   const departments = Array.from(
     new Set(
       projectRows
@@ -233,10 +225,6 @@ export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTab
     const currentDepartment = getDepartment(project);
 
     if (clientFilter !== "all" && project.client !== clientFilter) {
-      return false;
-    }
-
-    if (brandFilter !== "all" && project.brand !== brandFilter) {
       return false;
     }
 
@@ -257,7 +245,6 @@ export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTab
 
   const hasActiveFilters =
     clientFilter !== "all" ||
-    brandFilter !== "all" ||
     statusFilter !== "all" ||
     departmentFilter !== "all" ||
     delayedOnly;
@@ -273,7 +260,7 @@ export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTab
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [brandFilter, clientFilter, delayedOnly, departmentFilter, statusFilter]);
+  }, [clientFilter, delayedOnly, departmentFilter, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredProjects.length / rowsPerPage));
 
@@ -288,7 +275,7 @@ export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTab
   const paginationItems = buildPaginationItems(totalPages, safeCurrentPage);
   const visibleStartLabel = filteredProjects.length ? pageStart + 1 : 0;
   const visibleEndLabel = filteredProjects.length ? pageEnd : 0;
-  const emptyStateColSpan = canDeleteProjects ? 10 : 9;
+  const emptyStateColSpan = canDeleteProjects ? 8 : 7;
 
   const handleDeleteProject = async () => {
     if (!deleteTarget) {
@@ -340,7 +327,6 @@ export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTab
                 type="button"
                 onClick={() => {
                   setClientFilter("all");
-                  setBrandFilter("all");
                   setStatusFilter("all");
                   setDepartmentFilter("all");
                   setDelayedOnly(false);
@@ -358,7 +344,7 @@ export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTab
             </p>
           ) : null}
 
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <FilterField label="Client">
               <select
                 value={clientFilter}
@@ -369,21 +355,6 @@ export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTab
                 {clients.map((client) => (
                   <option key={client} value={client}>
                     {client}
-                  </option>
-                ))}
-              </select>
-            </FilterField>
-
-            <FilterField label="Brand">
-              <select
-                value={brandFilter}
-                onChange={(event) => setBrandFilter(event.target.value)}
-                className="w-full rounded-2xl border border-ink/10 bg-sand/50 px-3 py-2 text-sm outline-none transition focus:border-gold"
-              >
-                <option value="all">All brands</option>
-                {brands.map((brand) => (
-                  <option key={brand} value={brand}>
-                    {brand}
                   </option>
                 ))}
               </select>
@@ -439,12 +410,10 @@ export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTab
             <thead className="bg-sand/60">
               <tr className="text-left text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">
                 <th className="sticky top-0 bg-sand/95 px-5 py-4 backdrop-blur">Code</th>
-                <th className="sticky top-0 bg-sand/95 px-5 py-4 backdrop-blur">Project</th>
-                <th className="sticky top-0 bg-sand/95 px-5 py-4 backdrop-blur">Client</th>
+                <th className="sticky top-0 bg-sand/95 px-5 py-4 backdrop-blur">Project / Client</th>
                 <th className="sticky top-0 bg-sand/95 px-5 py-4 backdrop-blur">Department</th>
                 <th className="sticky top-0 bg-sand/95 px-5 py-4 backdrop-blur">Current stage</th>
-                <th className="sticky top-0 bg-sand/95 px-5 py-4 backdrop-blur">Status</th>
-                <th className="sticky top-0 bg-sand/95 px-5 py-4 backdrop-blur">ETA</th>
+                <th className="sticky top-0 bg-sand/95 px-5 py-4 backdrop-blur">Progress / ETA</th>
                 <th className="sticky top-0 bg-sand/95 px-5 py-4 backdrop-blur">Pending</th>
                 <th className="sticky top-0 bg-sand/95 px-5 py-4 backdrop-blur">Created</th>
                 {canDeleteProjects ? (
@@ -475,8 +444,8 @@ export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTab
                         <Link className="font-medium text-pine hover:text-ink" href={`/projects/${project.id}`}>
                           {project.name}
                         </Link>
+                        <div className="mt-1 text-xs text-ink/55">{project.client}</div>
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                          <span className="text-ink/45">{project.brand ?? "No brand set"}</span>
                           <span
                             className={`rounded-full px-2.5 py-1 font-semibold uppercase tracking-[0.12em] ${
                               project.priority === "accelerated"
@@ -488,7 +457,6 @@ export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTab
                           </span>
                         </div>
                       </td>
-                      <td className="px-5 py-4">{project.client}</td>
                       <td className="px-5 py-4">{project.current_stage?.responsible_dept ?? "Completed"}</td>
                       <td className="px-5 py-4">
                         {project.current_stage ? (
@@ -501,9 +469,11 @@ export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTab
                         )}
                       </td>
                       <td className="px-5 py-4">
-                        <StatusChip status={getRowStatus(project)} />
+                        <div className="space-y-2">
+                          <StatusChip status={getRowStatus(project)} />
+                          <div className={`text-sm font-semibold ${eta.tone}`}>{eta.label}</div>
+                        </div>
                       </td>
-                      <td className={`px-5 py-4 text-sm font-semibold ${eta.tone}`}>{eta.label}</td>
                       <td className="px-5 py-4">
                         <div className="space-y-1.5">
                           {pendingLabel ? <div className="font-semibold text-ink">{pendingLabel}</div> : null}
@@ -511,9 +481,6 @@ export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTab
                           <div className="text-xs text-ink/55">Assigned person: {assignedPerson}</div>
                           <div className="text-xs text-ink/55">
                             Total order value: {formatCurrency(project.total_order_value)}
-                          </div>
-                          <div className="text-xs text-ink/55">
-                            Number of stores: {project.number_of_stores ?? "Not set"}
                           </div>
                         </div>
                       </td>

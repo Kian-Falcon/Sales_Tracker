@@ -232,12 +232,10 @@ export interface MonthlyReport {
 export interface ProjectCreateInput {
   name: string;
   client: string;
-  brand?: string;
   assigned_person_name: string;
   priority: ProjectPriority;
   estimated_tat_days: number;
   total_order_value: number;
-  number_of_stores?: number | null;
   special_request?: string;
 }
 
@@ -246,7 +244,6 @@ export interface ProjectMetadataUpdateInput {
   priority: ProjectPriority;
   estimated_tat_days: number | null;
   total_order_value: number | null;
-  number_of_stores: number | null;
   special_request?: string | null;
 }
 

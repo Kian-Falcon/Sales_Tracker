@@ -67,14 +67,12 @@ class NotificationService:
         project_code: str,
         project_name: str,
         client: str,
-        brand: str | None,
         assigned_person_name: str | None,
         priority: str,
         created_by_name: str,
         created_by_department: str,
         estimated_tat_days: int,
         total_order_value: float,
-        number_of_stores: int | None,
         special_request: str | None,
         current_stage_name: str,
         recipients: list[str],
@@ -111,13 +109,11 @@ class NotificationService:
                     f"<p><strong>Project code:</strong> {escape(project_code)}</p>"
                     f"<p><strong>Project:</strong> {escape(project_name)}</p>"
                     f"<p><strong>Client:</strong> {escape(client)}</p>"
-                    f"<p><strong>Brand:</strong> {escape(brand or 'Not set')}</p>"
                     f"<p><strong>Assigned person:</strong> {escape(assigned_person_name or 'Unassigned')}</p>"
                     f"<p><strong>Priority:</strong> {escape(priority.title())}</p>"
                     f"<p><strong>Created by:</strong> {escape(created_by_name)} ({escape(created_by_department)})</p>"
                     f"<p><strong>Estimated TAT:</strong> {estimated_tat_days} day(s)</p>"
                     f"<p><strong>Total order value:</strong> INR {total_order_value:,.2f}</p>"
-                    f"<p><strong>Number of stores:</strong> {number_of_stores if number_of_stores is not None else 'Not set'}</p>"
                     f"<p><strong>Current active stage:</strong> {escape(current_stage_name)}</p>"
                     f"{special_request_html}"
                     "<p><strong>BOQ:</strong> Uploads can be reviewed inside the tracker documents panel.</p>"

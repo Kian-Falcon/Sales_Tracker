@@ -149,7 +149,6 @@ export default async function ReportsPage({
           label="Pipeline Value"
           value={formatCurrency(report.overview.total_pipeline_value)}
           accent="text-ink"
-          sublabel={`${report.overview.stores_in_scope} stores in scope`}
         />
       </section>
 
@@ -405,10 +404,7 @@ function ProjectReportRow({
         <Link href={`/projects/${project.project_id}`} className="font-medium text-pine hover:text-ink">
           {project.project_name}
         </Link>
-        <div className="mt-1 text-xs text-ink/45">
-          {project.client}
-          {project.brand ? ` • ${project.brand}` : ""}
-        </div>
+        <div className="mt-1 text-xs text-ink/45">{project.client}</div>
       </td>
       <td className="px-5 py-4">
         <div>{project.current_stage_name ?? "Completed workflow"}</div>
@@ -441,7 +437,6 @@ function ProjectReportRow({
         <div className="space-y-1 text-xs text-ink/55">
           <div>Assigned: {project.assigned_person_name ?? "Unassigned"}</div>
           <div>Value: {formatCurrency(project.total_order_value)}</div>
-          <div>Stores: {project.number_of_stores ?? "Not set"}</div>
           <div>Created: {formatDate(project.created_at)}</div>
         </div>
       </td>
