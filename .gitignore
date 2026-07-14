@@ -21,3 +21,5 @@ frontend/.env.local
 Thumbs.db
 tracker-doc-extract.txt
 .claude/
+/docs
+

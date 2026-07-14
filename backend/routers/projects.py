@@ -7,7 +7,7 @@ from io import StringIO
 from uuid import UUID
 
 from asyncpg import UniqueViolationError
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
 
 from auth import get_current_user, require_departments
@@ -30,6 +30,17 @@ from services.workflow_settings import load_stage_blueprint
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 logger = logging.getLogger(__name__)
+
+
+async def _send_project_created_summary_task(settings: Settings, payload: dict) -> None:
+    try:
+        await NotificationService(settings).send_project_created_summary(**payload)
+    except Exception as exc:
+        logger.warning(
+            "Project %s was created but summary email could not be sent: %s",
+            payload.get("project_code", "project"),
+            exc,
+        )
 
 
 def _project_status_label(current_stage_status: str | None) -> str:
@@ -82,7 +93,7 @@ def _format_pending_duration(start_value: datetime | None, end_value: datetime |
     if diff_hours >= 1:
         return f"{diff_hours} hour{'' if diff_hours == 1 else 's'}"
 
-    return "Less than 1 hour"
+    return ""
 
 
 def _normalize_project_row(row: dict | None) -> dict | None:
@@ -317,6 +328,7 @@ async def list_projects(
 @router.post("", response_model=ProjectDetail, status_code=status.HTTP_201_CREATED)
 async def create_project(
     payload: ProjectCreate,
+    background_tasks: BackgroundTasks = None,
     pool=Depends(get_pool),
     settings: Settings = Depends(get_settings),
     user: CurrentUser = Depends(require_departments(Department.SALES, Department.ADMIN)),
@@ -437,30 +449,28 @@ async def create_project(
     first_stage_name = stage_rows[0]["name"] if stage_rows else "Workflow started"
     project_url = f"{settings.frontend_url.rstrip('/')}/projects/{project['id']}" if settings.frontend_url else None
 
-    try:
-        await NotificationService(settings).send_project_created_summary(
-            project_code=project_dict["project_code"],
-            project_name=project_dict["name"],
-            client=project_dict["client"],
-            brand=project_dict.get("brand"),
-            assigned_person_name=project_dict.get("assigned_person_name"),
-            priority=project_dict["priority"],
-            created_by_name=creator_name or "Workflow user",
-            created_by_department=creator_department.value,
-            estimated_tat_days=project_dict["estimated_tat_days"],
-            total_order_value=project_dict["total_order_value"],
-            number_of_stores=project_dict["number_of_stores"],
-            special_request=project_dict.get("special_request"),
-            current_stage_name=first_stage_name,
-            recipients=recipients,
-            project_url=project_url,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Project %s was created but summary email could not be sent: %s",
-            project_dict["project_code"],
-            exc,
-        )
+    if recipients:
+        notification_payload = {
+            "project_code": project_dict["project_code"],
+            "project_name": project_dict["name"],
+            "client": project_dict["client"],
+            "brand": project_dict.get("brand"),
+            "assigned_person_name": project_dict.get("assigned_person_name"),
+            "priority": project_dict["priority"],
+            "created_by_name": creator_name or "Workflow user",
+            "created_by_department": creator_department.value,
+            "estimated_tat_days": project_dict["estimated_tat_days"],
+            "total_order_value": project_dict["total_order_value"],
+            "number_of_stores": project_dict["number_of_stores"],
+            "special_request": project_dict.get("special_request"),
+            "current_stage_name": first_stage_name,
+            "recipients": recipients,
+            "project_url": project_url,
+        }
+        if background_tasks is not None:
+            background_tasks.add_task(_send_project_created_summary_task, settings, notification_payload)
+        else:
+            await _send_project_created_summary_task(settings, notification_payload)
 
     return _build_project_detail(project_dict, stage_rows, [], [], [])
 

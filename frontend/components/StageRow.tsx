@@ -1,7 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   useCompleteStageMutation,
@@ -9,7 +8,7 @@ import {
   useReviewStageDueDateRequestMutation,
   useSetDueDateMutation
 } from "@/hooks/useStage";
-import type { Department, DueDateRequestStatus, Stage } from "@/lib/types";
+import type { Department, DueDateRequestStatus, ProjectDetail, Stage } from "@/lib/types";
 import {
   formatDate,
   formatDateTime,
@@ -21,12 +20,13 @@ import { StatusChip } from "@/components/StatusChip";
 
 export function StageRow({
   stage,
-  viewerDepartment
+  viewerDepartment,
+  onProjectChange
 }: {
   stage: Stage;
   viewerDepartment?: Department;
+  onProjectChange?: (project: ProjectDetail) => void;
 }) {
-  const router = useRouter();
   const completeStage = useCompleteStageMutation();
   const setDueDate = useSetDueDateMutation();
   const requestDueDateChange = useRequestStageDueDateChangeMutation();
@@ -49,6 +49,15 @@ export function StageRow({
   const canReviewRequests = viewerDepartment === "Sales" || viewerDepartment === "Admin";
   const canComment = ["active", "overdue"].includes(stage.status);
   const showCompletionAction = canMarkStageComplete || stage.status === "done";
+  const pendingDurationLabel = formatPendingDuration(
+    stage.activated_at,
+    stage.status === "done" ? stage.completed_at : undefined
+  );
+
+  useEffect(() => {
+    setDueDate_(stage.due_date ?? "");
+    setRequestedDueDate(stage.due_date ?? "");
+  }, [stage.id, stage.due_date]);
 
   return (
     <section className="space-y-4 rounded-[28px] border border-ink/10 bg-white p-5 shadow-panel">
@@ -82,7 +91,7 @@ export function StageRow({
                 onClick={() =>
                   setDueDate.mutate(
                     { stageId: stage.id, dueDate },
-                    { onSuccess: () => router.refresh() }
+                    { onSuccess: (updatedProject) => onProjectChange?.(updatedProject) }
                   )
                 }
                 className="rounded-full border border-ink px-3 py-1.5 text-xs font-medium text-ink transition hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
@@ -103,7 +112,11 @@ export function StageRow({
             <button
               type="button"
               disabled={completeStage.isPending || stage.status === "done" || !canMarkStageComplete}
-              onClick={() => completeStage.mutate(stage.id, { onSuccess: () => router.refresh() })}
+              onClick={() =>
+                completeStage.mutate(stage.id, {
+                  onSuccess: (updatedProject) => onProjectChange?.(updatedProject)
+                })
+              }
               className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
                 stage.status === "done"
                   ? "border border-ink/10 bg-sand/60 text-ink/45"
@@ -122,10 +135,7 @@ export function StageRow({
         <StageMeta label="Completed" value={formatDateTime(stage.completed_at)} />
         <StageMeta
           label={stage.status === "done" ? "Turnaround" : "Pending"}
-          value={formatPendingDuration(
-            stage.activated_at,
-            stage.status === "done" ? stage.completed_at : undefined
-          )}
+          value={pendingDurationLabel || "—"}
         />
       </div>
 
@@ -191,9 +201,9 @@ export function StageRow({
                         reason: requestReason.trim()
                       },
                       {
-                        onSuccess: () => {
+                        onSuccess: (updatedProject) => {
+                          onProjectChange?.(updatedProject);
                           setRequestReason("");
-                          router.refresh();
                         }
                       }
                     )
@@ -271,7 +281,7 @@ export function StageRow({
                                 action: "approve",
                                 note: reviewNotes[request.id]?.trim() || undefined
                               },
-                              { onSuccess: () => router.refresh() }
+                              { onSuccess: (updatedProject) => onProjectChange?.(updatedProject) }
                             )
                           }
                           className="rounded-full bg-pine px-4 py-2 text-sm font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-60"
@@ -289,7 +299,7 @@ export function StageRow({
                                 action: "reject",
                                 note: reviewNotes[request.id]?.trim() || undefined
                               },
-                              { onSuccess: () => router.refresh() }
+                              { onSuccess: (updatedProject) => onProjectChange?.(updatedProject) }
                             )
                           }
                           className="rounded-full border border-ember px-4 py-2 text-sm font-semibold text-ember transition hover:bg-ember hover:text-white disabled:cursor-not-allowed disabled:opacity-60"

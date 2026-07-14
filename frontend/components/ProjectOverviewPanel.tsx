@@ -59,8 +59,7 @@ export function ProjectOverviewPanel({
   const canEdit = viewerDepartment === "Sales" || viewerDepartment === "Admin";
   const hasMissingDetails =
     project.estimated_tat_days === null ||
-    project.total_order_value === null ||
-    project.number_of_stores === null;
+    project.total_order_value === null;
 
   const updateField = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setForm((current) => ({

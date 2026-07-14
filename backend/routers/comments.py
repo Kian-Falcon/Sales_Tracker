@@ -2,7 +2,7 @@ import logging
 import re
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from auth import get_current_user
 from config import Settings, get_settings
@@ -15,6 +15,18 @@ from services.notification import NotificationService
 router = APIRouter(prefix="/api/v1/stages", tags=["comments"])
 logger = logging.getLogger(__name__)
 MENTION_PATTERN = re.compile(r"(?<!\S)@([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})\b")
+
+
+async def _send_comment_mention_task(settings: Settings, payload: dict) -> None:
+    try:
+        await NotificationService(settings).send_comment_mention(**payload)
+    except Exception as exc:
+        logger.warning(
+            "Comment mention email could not be sent for %s / %s: %s",
+            payload.get("project_code", "project"),
+            payload.get("stage_name", "stage"),
+            exc,
+        )
 
 
 def _extract_mentioned_emails(text: str) -> list[str]:
@@ -75,6 +87,7 @@ async def list_stage_mentionable_users(
 async def add_comment(
     stage_id: UUID,
     payload: CommentCreate,
+    background_tasks: BackgroundTasks = None,
     pool=Depends(get_pool),
     settings: Settings = Depends(get_settings),
     user: CurrentUser = Depends(get_current_user),
@@ -162,14 +175,9 @@ async def add_comment(
                 }
 
     if mention_notification_payload:
-        try:
-            await NotificationService(settings).send_comment_mention(**mention_notification_payload)
-        except Exception as exc:
-            logger.warning(
-                "Comment mention email could not be sent for %s / %s: %s",
-                mention_notification_payload["project_code"],
-                mention_notification_payload["stage_name"],
-                exc,
-            )
+        if background_tasks is not None:
+            background_tasks.add_task(_send_comment_mention_task, settings, mention_notification_payload)
+        else:
+            await _send_comment_mention_task(settings, mention_notification_payload)
 
     return inserted_comment

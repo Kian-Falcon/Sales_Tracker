@@ -2,7 +2,7 @@ import logging
 from datetime import date, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from auth import get_current_user
 from config import Settings, get_settings
@@ -20,6 +20,42 @@ from services.workflow_settings import get_due_days_by_stage_key
 
 router = APIRouter(prefix="/api/v1/stages", tags=["stages"])
 logger = logging.getLogger(__name__)
+
+
+async def _send_stage_handoff_notification_task(settings: Settings, payload: dict) -> None:
+    try:
+        await NotificationService(settings).send_stage_handoff_notification(**payload)
+    except Exception as exc:
+        logger.warning(
+            "Stage handoff email could not be sent for %s / %s: %s",
+            payload.get("project_code", "project"),
+            payload.get("next_stage_name", "next stage"),
+            exc,
+        )
+
+
+async def _send_due_date_change_request_task(settings: Settings, payload: dict) -> None:
+    try:
+        await NotificationService(settings).send_due_date_change_request(**payload)
+    except Exception as exc:
+        logger.warning(
+            "Due-date request email could not be sent for %s / %s: %s",
+            payload.get("project_code", "project"),
+            payload.get("stage_name", "stage"),
+            exc,
+        )
+
+
+async def _send_due_date_change_resolution_task(settings: Settings, payload: dict) -> None:
+    try:
+        await NotificationService(settings).send_due_date_change_resolution(**payload)
+    except Exception as exc:
+        logger.warning(
+            "Due-date resolution email could not be sent for %s / %s: %s",
+            payload.get("project_code", "project"),
+            payload.get("stage_name", "stage"),
+            exc,
+        )
 
 
 def _completion_timing_label(*, due_date: date | None, completed_on: date, previous_status: str) -> str:
@@ -85,6 +121,7 @@ async def _list_profile_emails(
 @router.patch("/{stage_id}/complete")
 async def complete_stage(
     stage_id: UUID,
+    background_tasks: BackgroundTasks = None,
     pool=Depends(get_pool),
     settings: Settings = Depends(get_settings),
     user: CurrentUser = Depends(get_current_user),
@@ -182,15 +219,10 @@ async def complete_stage(
         )
 
     if notification_payload:
-        try:
-            await NotificationService(settings).send_stage_handoff_notification(**notification_payload)
-        except Exception as exc:
-            logger.warning(
-                "Stage handoff email could not be sent for %s / %s: %s",
-                notification_payload["project_code"],
-                notification_payload["next_stage_name"],
-                exc,
-            )
+        if background_tasks is not None:
+            background_tasks.add_task(_send_stage_handoff_notification_task, settings, notification_payload)
+        else:
+            await _send_stage_handoff_notification_task(settings, notification_payload)
 
     return detail
 
@@ -255,6 +287,7 @@ async def set_stage_due_date(
 async def request_stage_due_date_change(
     stage_id: UUID,
     payload: StageDueDateChangeRequestCreate,
+    background_tasks: BackgroundTasks = None,
     pool=Depends(get_pool),
     settings: Settings = Depends(get_settings),
     user: CurrentUser = Depends(get_current_user),
@@ -360,15 +393,10 @@ async def request_stage_due_date_change(
         )
 
     if notification_payload:
-        try:
-            await NotificationService(settings).send_due_date_change_request(**notification_payload)
-        except Exception as exc:
-            logger.warning(
-                "Due-date request email could not be sent for %s / %s: %s",
-                notification_payload["project_code"],
-                notification_payload["stage_name"],
-                exc,
-            )
+        if background_tasks is not None:
+            background_tasks.add_task(_send_due_date_change_request_task, settings, notification_payload)
+        else:
+            await _send_due_date_change_request_task(settings, notification_payload)
 
     return detail
 
@@ -378,6 +406,7 @@ async def review_stage_due_date_request(
     stage_id: UUID,
     request_id: UUID,
     payload: StageDueDateChangeRequestReview,
+    background_tasks: BackgroundTasks = None,
     pool=Depends(get_pool),
     settings: Settings = Depends(get_settings),
     user: CurrentUser = Depends(get_current_user),
@@ -482,14 +511,9 @@ async def review_stage_due_date_request(
         )
 
     if notification_payload:
-        try:
-            await NotificationService(settings).send_due_date_change_resolution(**notification_payload)
-        except Exception as exc:
-            logger.warning(
-                "Due-date resolution email could not be sent for %s / %s: %s",
-                notification_payload["project_code"],
-                notification_payload["stage_name"],
-                exc,
-            )
+        if background_tasks is not None:
+            background_tasks.add_task(_send_due_date_change_resolution_task, settings, notification_payload)
+        else:
+            await _send_due_date_change_resolution_task(settings, notification_payload)
 
     return detail

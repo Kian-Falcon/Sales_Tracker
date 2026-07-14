@@ -63,7 +63,7 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
             priority: form.priority,
             estimated_tat_days: Number(form.estimated_tat_days),
             total_order_value: Number(form.total_order_value),
-            number_of_stores: Number(form.number_of_stores),
+            number_of_stores: form.number_of_stores ? Number(form.number_of_stores) : null,
             special_request: form.special_request.trim() || undefined
           });
 
@@ -72,13 +72,11 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
               await uploadProjectDocument(project.id, boqFile, "boq");
             } catch {
               router.push(`/projects/${project.id}?upload=failed`);
-              router.refresh();
               return;
             }
           }
 
           router.push(`/projects/${project.id}`);
-          router.refresh();
         } catch (caughtError) {
           setError(caughtError instanceof Error ? caughtError.message : "Unable to create project.");
         }
@@ -167,6 +165,7 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
           type="number"
           inputMode="numeric"
           min={1}
+          required={false}
         />
 
         <label className="block space-y-2 lg:col-span-2">

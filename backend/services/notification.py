@@ -74,7 +74,7 @@ class NotificationService:
         created_by_department: str,
         estimated_tat_days: int,
         total_order_value: float,
-        number_of_stores: int,
+        number_of_stores: int | None,
         special_request: str | None,
         current_stage_name: str,
         recipients: list[str],
@@ -117,7 +117,7 @@ class NotificationService:
                     f"<p><strong>Created by:</strong> {escape(created_by_name)} ({escape(created_by_department)})</p>"
                     f"<p><strong>Estimated TAT:</strong> {estimated_tat_days} day(s)</p>"
                     f"<p><strong>Total order value:</strong> INR {total_order_value:,.2f}</p>"
-                    f"<p><strong>Number of stores:</strong> {number_of_stores}</p>"
+                    f"<p><strong>Number of stores:</strong> {number_of_stores if number_of_stores is not None else 'Not set'}</p>"
                     f"<p><strong>Current active stage:</strong> {escape(current_stage_name)}</p>"
                     f"{special_request_html}"
                     "<p><strong>BOQ:</strong> Uploads can be reviewed inside the tracker documents panel.</p>"

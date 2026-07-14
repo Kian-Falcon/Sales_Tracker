@@ -15,7 +15,7 @@ class ProjectCreate(BaseModel):
     priority: ProjectPriority = ProjectPriority.NORMAL
     estimated_tat_days: int = Field(ge=1, le=3650)
     total_order_value: float = Field(ge=0)
-    number_of_stores: int = Field(ge=1, le=100000)
+    number_of_stores: int | None = Field(default=None, ge=1, le=100000)
     special_request: str | None = Field(default=None, max_length=2000)
 
 

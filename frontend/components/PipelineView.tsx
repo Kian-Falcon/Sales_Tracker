@@ -1,14 +1,24 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
 import type { Department, ProjectDetail } from "@/lib/types";
 import { phaseOrder, titleCasePhase } from "@/lib/utils";
 import { StageRow } from "@/components/StageRow";
 
 export function PipelineView({
-  project,
+  project: initialProject,
   viewerDepartment
 }: {
   project: ProjectDetail;
   viewerDepartment?: Department;
 }) {
+  const [project, setProject] = useState(initialProject);
+
+  useEffect(() => {
+    setProject(initialProject);
+  }, [initialProject]);
+
   return (
     <div className="space-y-8">
       {phaseOrder.map((phase) => {
@@ -27,7 +37,12 @@ export function PipelineView({
             </div>
             <div className="grid gap-4">
               {stages.map((stage) => (
-                <StageRow key={stage.id} stage={stage} viewerDepartment={viewerDepartment} />
+                <StageRow
+                  key={stage.id}
+                  stage={stage}
+                  viewerDepartment={viewerDepartment}
+                  onProjectChange={setProject}
+                />
               ))}
             </div>
           </section>

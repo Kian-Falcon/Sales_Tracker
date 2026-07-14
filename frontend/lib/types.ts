@@ -237,7 +237,7 @@ export interface ProjectCreateInput {
   priority: ProjectPriority;
   estimated_tat_days: number;
   total_order_value: number;
-  number_of_stores: number;
+  number_of_stores?: number | null;
   special_request?: string;
 }
 

@@ -68,7 +68,7 @@ export function formatPendingDuration(
     return `${diffHours} hour${diffHours === 1 ? "" : "s"}`;
   }
 
-  return "Less than 1 hour";
+  return "";
 }
 
 export function titleCasePhase(phase: StagePhase) {
