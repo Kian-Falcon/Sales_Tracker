@@ -26,6 +26,7 @@ from services.storage import (
     upload_storage_object,
 )
 from services.notification import NotificationService
+from services.airtable_sync import delete_project_tree, sync_project_tree
 from services.workflow_settings import load_stage_blueprint
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
@@ -93,7 +94,44 @@ def _format_pending_duration(start_value: datetime | None, end_value: datetime |
     if diff_hours >= 1:
         return f"{diff_hours} hour{'' if diff_hours == 1 else 's'}"
 
-    return ""
+    return "< 1 hour"
+
+
+def _format_csv_date(value: date | None, *, empty_label: str = "Not set") -> str:
+    if value is None:
+        return empty_label
+
+    return value.strftime("%d %b %Y")
+
+
+def _format_csv_datetime(value: datetime | None, *, empty_label: str = "") -> str:
+    if value is None:
+        return empty_label
+
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).strftime("%d %b %Y, %I:%M %p UTC")
+
+    return value.strftime("%d %b %Y, %I:%M %p")
+
+
+def _format_csv_currency(value: float | int | None, *, empty_label: str = "Not set") -> str:
+    if value is None:
+        return empty_label
+
+    return f"INR {float(value):,.2f}"
+
+
+def _format_csv_progress(completed_stages: int | None, total_stages: int | None) -> str:
+    return f"{int(completed_stages or 0)}/{int(total_stages or 0)}"
+
+
+def _format_csv_completion_rate(completed_stages: int | None, total_stages: int | None) -> str:
+    total = int(total_stages or 0)
+    if total <= 0:
+        return "0%"
+
+    completed = int(completed_stages or 0)
+    return f"{round((completed / total) * 100)}%"
 
 
 def _normalize_project_row(row: dict | None) -> dict | None:
@@ -173,6 +211,7 @@ async def load_project_detail(
     project_id: UUID,
     settings: Settings | None = None,
     viewer_department: Department | None = None,
+    include_pending: bool = False,
 ) -> ProjectDetail:
     """Load a full project detail (project + ordered stages + comments + documents)."""
     project_row = await connection.fetchrow(
@@ -199,11 +238,12 @@ async def load_project_detail(
             for stage in stage_rows
             if stage["responsible_dept"] == viewer_department.value
         ]
-    stage_rows = [
-        stage
-        for stage in stage_rows
-        if stage["status"] != "pending"
-    ]
+    if not include_pending:
+        stage_rows = [
+            stage
+            for stage in stage_rows
+            if stage["status"] != "pending"
+        ]
 
     visible_stage_ids = [stage["id"] for stage in stage_rows]
     comment_rows: list[dict] = []
@@ -274,12 +314,16 @@ async def list_projects(
         SELECT
             p.*,
             s.id AS current_stage_id,
+            s.stage_key AS current_stage_key,
             s.name AS current_stage_name,
             s.phase AS current_stage_phase,
             s.responsible_dept AS current_stage_dept,
             s.status AS current_stage_status,
+            s.sort_order AS current_stage_sort_order,
             s.activated_at AS current_stage_activated_at,
-            s.due_date AS current_stage_due_date
+            s.due_date AS current_stage_due_date,
+            stage_counts.completed_stages,
+            stage_counts.total_stages
         FROM projects p
         LEFT JOIN LATERAL (
             SELECT *
@@ -289,6 +333,13 @@ async def list_projects(
             ORDER BY sort_order
             LIMIT 1
         ) s ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT
+                COUNT(*) FILTER (WHERE status = 'done') AS completed_stages,
+                COUNT(*) AS total_stages
+            FROM stages
+            WHERE project_id = p.id
+        ) stage_counts ON TRUE
         WHERE p.is_archived = FALSE
         ORDER BY p.created_at DESC
         """
@@ -305,6 +356,8 @@ async def list_projects(
                 phase=normalized["current_stage_phase"],
                 responsible_dept=normalized["current_stage_dept"],
                 status=normalized["current_stage_status"],
+                stage_key=normalized["current_stage_key"],
+                sort_order=normalized["current_stage_sort_order"],
                 activated_at=normalized["current_stage_activated_at"],
                 due_date=normalized["current_stage_due_date"],
             )
@@ -321,6 +374,8 @@ async def list_projects(
                 estimated_tat_days=normalized["estimated_tat_days"],
                 total_order_value=normalized["total_order_value"],
                 number_of_stores=normalized["number_of_stores"],
+                completed_stages=normalized.get("completed_stages") or 0,
+                total_stages=normalized.get("total_stages") or 0,
                 created_at=normalized["created_at"],
                 is_archived=normalized["is_archived"],
                 current_stage=snapshot,
@@ -475,6 +530,11 @@ async def create_project(
         else:
             await _send_project_created_summary_task(settings, notification_payload)
 
+    if background_tasks is not None:
+        background_tasks.add_task(sync_project_tree, pool, settings, project["id"])
+    else:
+        await sync_project_tree(pool, settings, project["id"])
+
     return _build_project_detail(project_dict, stage_rows, [], [], [])
 
 
@@ -482,49 +542,113 @@ async def create_project(
 async def update_project_metadata(
     project_id: UUID,
     payload: ProjectUpdate,
+    background_tasks: BackgroundTasks = None,
     pool=Depends(get_pool),
     settings: Settings = Depends(get_settings),
     user: CurrentUser = Depends(require_departments(Department.SALES, Department.ADMIN)),
 ) -> ProjectDetail:
-    assigned_person_name = payload.assigned_person_name.strip()
-    if not assigned_person_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned person is required.")
-
-    special_request = payload.special_request.strip() if payload.special_request else None
+    provided_fields = payload.model_dump(exclude_unset=True)
+    if not provided_fields:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No project fields were provided.")
 
     async with transaction(pool) as connection:
+        current_project = await connection.fetchrow(
+            """
+            SELECT *
+            FROM projects
+            WHERE id = $1
+              AND is_archived = FALSE
+            """,
+            project_id,
+        )
+        if current_project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+
+        current_project_dict = record_to_dict(current_project)
+        assigned_person_name = current_project_dict["assigned_person_name"]
+        if "assigned_person_name" in provided_fields:
+            assigned_person_name = payload.assigned_person_name.strip() if payload.assigned_person_name else ""
+            if not assigned_person_name:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned person is required.")
+
+        project_name = current_project_dict["name"]
+        if "name" in provided_fields:
+            project_name = payload.name.strip() if payload.name else ""
+            if not project_name:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project name is required.")
+
+        client_name = current_project_dict["client"]
+        if "client" in provided_fields:
+            client_name = payload.client.strip() if payload.client else ""
+            if not client_name:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Client is required.")
+
+        special_request = current_project_dict["special_request"]
+        if "special_request" in provided_fields:
+            special_request = payload.special_request.strip() if payload.special_request else None
+
+        priority = (
+            payload.priority.value
+            if payload.priority is not None and "priority" in provided_fields
+            else current_project_dict["priority"]
+        )
+        estimated_tat_days = (
+            payload.estimated_tat_days
+            if "estimated_tat_days" in provided_fields
+            else current_project_dict["estimated_tat_days"]
+        )
+        total_order_value = (
+            payload.total_order_value
+            if "total_order_value" in provided_fields
+            else current_project_dict["total_order_value"]
+        )
+        number_of_stores = (
+            payload.number_of_stores
+            if "number_of_stores" in provided_fields
+            else current_project_dict["number_of_stores"]
+        )
+
         await set_audit_actor(connection, user.user_id)
         updated_project = await connection.fetchrow(
             """
             UPDATE projects
             SET
-                assigned_person_name = $2,
-                priority = $3,
-                estimated_tat_days = $4,
-                total_order_value = $5,
-                number_of_stores = $6,
-                special_request = $7
+                name = $2,
+                client = $3,
+                assigned_person_name = $4,
+                priority = $5,
+                estimated_tat_days = $6,
+                total_order_value = $7,
+                number_of_stores = $8,
+                special_request = $9
             WHERE id = $1
               AND is_archived = FALSE
             RETURNING id
             """,
             project_id,
+            project_name,
+            client_name,
             assigned_person_name,
-            payload.priority.value,
-            payload.estimated_tat_days,
-            payload.total_order_value,
-            payload.number_of_stores,
+            priority,
+            estimated_tat_days,
+            total_order_value,
+            number_of_stores,
             special_request,
         )
-        if updated_project is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
 
-        return await load_project_detail(
+        detail = await load_project_detail(
             connection,
             project_id,
             settings=settings,
             viewer_department=user.department,
         )
+
+    if background_tasks is not None:
+        background_tasks.add_task(sync_project_tree, pool, settings, project_id)
+    else:
+        await sync_project_tree(pool, settings, project_id)
+
+    return detail
 
 
 @router.post("/{project_id}/documents", response_model=ProjectDocumentRead, status_code=status.HTTP_201_CREATED)
@@ -532,6 +656,7 @@ async def upload_project_document(
     project_id: UUID,
     document_type: ProjectDocumentType = Form(ProjectDocumentType.BOQ),
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None,
     pool=Depends(get_pool),
     settings: Settings = Depends(get_settings),
     user: CurrentUser = Depends(require_departments(Department.SALES, Department.ADMIN)),
@@ -633,6 +758,11 @@ async def upload_project_document(
 
     inserted_row = record_to_dict(inserted) or {}
     inserted_row["file_size"] = int(inserted_row["file_size"])
+    if background_tasks is not None:
+        background_tasks.add_task(sync_project_tree, pool, settings, project_id)
+    else:
+        await sync_project_tree(pool, settings, project_id)
+
     return ProjectDocumentRead(**inserted_row, download_url=download_url)
 
 
@@ -654,6 +784,7 @@ async def get_project(
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(
     project_id: UUID,
+    background_tasks: BackgroundTasks = None,
     pool=Depends(get_pool),
     settings: Settings = Depends(get_settings),
     user: CurrentUser = Depends(require_departments(Department.ADMIN)),
@@ -729,17 +860,24 @@ async def delete_project(
                 len(cleanup_errors),
             )
 
+    if background_tasks is not None:
+        background_tasks.add_task(delete_project_tree, settings, project_id)
+    else:
+        await delete_project_tree(settings, project_id)
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/export/csv")
 async def export_projects_csv(
     pool=Depends(get_pool),
+    settings: Settings = Depends(get_settings),
     user: CurrentUser = Depends(require_departments(Department.SALES, Department.ADMIN)),
 ) -> StreamingResponse:
     rows = await pool.fetch(
         """
         SELECT
+            p.id,
             p.project_code,
             p.name AS project_name,
             p.client,
@@ -755,7 +893,9 @@ async def export_projects_csv(
             s.responsible_dept AS current_stage_dept,
             s.status AS current_stage_status,
             s.activated_at AS current_stage_activated_at,
-            s.due_date AS current_stage_due_date
+            s.due_date AS current_stage_due_date,
+            stage_counts.completed_stages,
+            stage_counts.total_stages
         FROM projects p
         LEFT JOIN LATERAL (
             SELECT *
@@ -765,63 +905,77 @@ async def export_projects_csv(
             ORDER BY sort_order
             LIMIT 1
         ) s ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT
+                COUNT(*) FILTER (WHERE status = 'done') AS completed_stages,
+                COUNT(*) AS total_stages
+            FROM stages
+            WHERE project_id = p.id
+        ) stage_counts ON TRUE
         WHERE p.is_archived = FALSE
         ORDER BY p.created_at DESC
         """
     )
 
     buffer = StringIO()
-    writer = csv.DictWriter(
+    buffer.write("\ufeff")
+    writer = csv.writer(
         buffer,
-        fieldnames=[
-            "project_code",
-            "project_name",
-            "client",
-            "assigned_person_name",
-            "priority",
-            "estimated_tat_days",
-            "total_order_value",
-            "project_status",
-            "current_stage",
-            "current_phase",
-            "responsible_department",
-            "stage_status",
-            "due_date",
-            "eta",
-            "pending_duration",
-            "activated_at",
-            "created_at",
-        ],
+        lineterminator="\n",
     )
-    writer.writeheader()
+    writer.writerow(
+        [
+            "Project Code",
+            "Project Name",
+            "Client",
+            "Assigned Person",
+            "Priority",
+            "Project Status",
+            "Current Stage",
+            "Current Phase",
+            "Responsible Team",
+            "Due Date",
+            "ETA",
+            "Workflow Progress",
+            "Completion %",
+            "Estimated TAT (Days)",
+            "Order Value (INR)",
+            "Activated On",
+            "Created On",
+            "Project Link",
+        ]
+    )
     for row in records_to_dicts(rows):
         normalized = _normalize_project_row(row) or {}
+        project_url = (
+            f"{settings.frontend_url.rstrip('/')}/projects/{normalized['id']}"
+            if settings.frontend_url
+            else ""
+        )
         writer.writerow(
-            {
-                "project_code": normalized["project_code"],
-                "project_name": normalized["project_name"],
-                "client": normalized["client"],
-                "assigned_person_name": normalized["assigned_person_name"] or "",
-                "priority": normalized["priority"].title(),
-                "estimated_tat_days": normalized["estimated_tat_days"] or "",
-                "total_order_value": f"{normalized['total_order_value']:.2f}"
-                if normalized["total_order_value"] is not None
-                else "",
-                "project_status": _project_status_label(normalized["current_stage_status"]),
-                "current_stage": normalized["current_stage_name"] or "",
-                "current_phase": normalized["current_stage_phase"].title() if normalized["current_stage_phase"] else "",
-                "responsible_department": normalized["current_stage_dept"] or "",
-                "stage_status": _stage_status_label(normalized["current_stage_status"]),
-                "due_date": normalized["current_stage_due_date"].isoformat() if normalized["current_stage_due_date"] else "",
-                "eta": _eta_label(normalized["current_stage_due_date"], normalized["current_stage_status"]),
-                "pending_duration": _format_pending_duration(normalized["current_stage_activated_at"])
-                if normalized["current_stage_status"]
-                else "Completed",
-                "activated_at": normalized["current_stage_activated_at"].isoformat()
-                if normalized["current_stage_activated_at"]
-                else "",
-                "created_at": normalized["created_at"].isoformat(),
-            }
+            [
+                normalized["project_code"],
+                normalized["project_name"],
+                normalized["client"],
+                normalized["assigned_person_name"] or "Unassigned",
+                normalized["priority"].title(),
+                _project_status_label(normalized["current_stage_status"]),
+                normalized["current_stage_name"] or "Completed workflow",
+                normalized["current_stage_phase"].title() if normalized["current_stage_phase"] else "-",
+                normalized["current_stage_dept"] or "-",
+                _format_csv_date(
+                    normalized["current_stage_due_date"],
+                    empty_label="Completed" if not normalized["current_stage_status"] else "Not set",
+                ),
+                _eta_label(normalized["current_stage_due_date"], normalized["current_stage_status"]),
+                _format_csv_progress(normalized.get("completed_stages"), normalized.get("total_stages")),
+                _format_csv_completion_rate(normalized.get("completed_stages"), normalized.get("total_stages")),
+                normalized["estimated_tat_days"] or "Not set",
+                _format_csv_currency(normalized["total_order_value"]),
+                _format_csv_datetime(normalized["current_stage_activated_at"], empty_label="-"),
+                _format_csv_datetime(normalized["created_at"]),
+                project_url,
+            ]
         )
 
     buffer.seek(0)

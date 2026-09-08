@@ -249,6 +249,7 @@ export function UserSidebar({
   }, [viewer?.department]);
 
   const showExpanded = mobileOpen || !collapsed;
+  const compactDesktopSidebar = !showExpanded;
 
   const handleLogout = () => {
     setError(null);
@@ -340,7 +341,7 @@ export function UserSidebar({
         aria-label="Close sidebar overlay"
         onClick={onCloseMobile}
         className={cn(
-          "fixed inset-0 z-30 bg-ink/40 backdrop-blur-sm transition-opacity lg:hidden",
+          "fixed inset-0 z-30 bg-ink/20 backdrop-blur-sm transition-opacity lg:hidden",
           mobileOpen ? "opacity-100" : "pointer-events-none opacity-0"
         )}
       />
@@ -353,11 +354,16 @@ export function UserSidebar({
           "w-[min(20rem,100vw)]"
         )}
       >
-        <div className="flex h-full flex-col overflow-hidden border-r border-white/10 bg-ink text-white shadow-2xl lg:shadow-none">
-          <div className="flex items-start justify-between gap-3 border-b border-white/10 px-5 py-5">
+        <div className="flex h-full flex-col overflow-hidden border-r border-border bg-surface text-ink shadow-panel lg:shadow-none">
+          <div
+            className={cn(
+              "flex items-start justify-between gap-3 border-b border-border",
+              compactDesktopSidebar ? "px-3 py-4 lg:justify-center" : "px-5 py-5"
+            )}
+          >
             <div className={cn("space-y-1", !showExpanded && "lg:hidden")}>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/45">Kian Falcon</p>
-              <p className="text-lg font-semibold text-white">Workflow Tracker</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Kian Falcon</p>
+              <p className="text-lg font-semibold text-ink">Workflow Tracker</p>
             </div>
 
             <div className="flex items-center gap-2">
@@ -367,7 +373,7 @@ export function UserSidebar({
                 aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
                 title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
                 className={cn(
-                  "hidden items-center justify-center rounded-full border border-white/10 text-xs font-semibold text-white/75 transition hover:border-gold hover:text-gold lg:inline-flex",
+                  "hidden items-center justify-center rounded-full border border-border text-xs font-semibold text-ink/70 transition hover:border-accent hover:bg-accent/5 hover:text-accent lg:inline-flex",
                   collapsed ? "h-11 w-11" : "gap-2 px-4 py-2"
                 )}
               >
@@ -377,16 +383,21 @@ export function UserSidebar({
               <button
                 type="button"
                 onClick={onCloseMobile}
-                className="rounded-full border border-white/10 px-3 py-1.5 text-xs font-semibold text-white/75 transition hover:border-gold hover:text-gold lg:hidden"
+                className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-ink/70 transition hover:border-accent hover:bg-accent/5 hover:text-accent lg:hidden"
               >
                 Close
               </button>
             </div>
           </div>
 
-          <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5">
+          <div
+            className={cn(
+              "flex-1 space-y-5 overflow-y-auto",
+              compactDesktopSidebar ? "px-2 py-4" : "px-4 py-5"
+            )}
+          >
             <section className="space-y-3">
-              <p className={cn("text-[11px] font-semibold uppercase tracking-[0.16em] text-white/45", !showExpanded && "lg:hidden")}>
+              <p className={cn("text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45", !showExpanded && "lg:hidden")}>
                 Navigation
               </p>
               <nav className="space-y-2">
@@ -405,16 +416,16 @@ export function UserSidebar({
                         "group flex items-center rounded-[22px] py-3 transition",
                         showExpanded ? "gap-3 px-3" : "justify-center px-0",
                         isActive
-                          ? "bg-white text-ink"
-                          : "text-white/75 hover:bg-white/8 hover:text-white"
+                          ? "bg-accent/10 text-accent"
+                          : "text-ink/70 hover:bg-surface-muted hover:text-ink"
                       )}
                     >
                       <span
                         className={cn(
                           "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border text-xs font-semibold",
                           isActive
-                            ? "border-ink/10 bg-sand text-ink"
-                            : "border-white/10 bg-white/5 text-white/80"
+                            ? "border-accent/15 bg-accent/10 text-accent"
+                            : "border-border bg-white text-ink/65"
                         )}
                       >
                         <Icon className="h-5 w-5" />
@@ -425,7 +436,7 @@ export function UserSidebar({
                         <span
                           className={cn(
                             "block truncate text-xs",
-                            isActive ? "text-ink/55" : "text-white/45"
+                            isActive ? "text-accent/70" : "text-ink/45"
                           )}
                         >
                           {item.description}
@@ -438,25 +449,35 @@ export function UserSidebar({
             </section>
           </div>
 
-          <section className="border-t border-white/10 bg-white/[0.03] px-4 py-4">
-            <div className="rounded-[26px] border border-white/10 bg-white/[0.04] p-4">
-              <div className="flex items-start gap-3">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-sm font-semibold text-white">
+          <section
+            className={cn(
+              "border-t border-border bg-surface-muted/60",
+              compactDesktopSidebar ? "px-2 py-3" : "px-4 py-4"
+            )}
+          >
+            <div
+              className={cn(
+                "rounded-[26px] border border-border bg-white",
+                compactDesktopSidebar ? "p-2.5" : "p-4"
+              )}
+            >
+              <div className={cn("flex items-start gap-3", compactDesktopSidebar && "justify-center")}>
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-ink text-sm font-semibold text-white">
                   {getInitials(viewer?.fullName ?? "Workflow user")}
                 </div>
 
                 <div className={cn("min-w-0 flex-1 space-y-1", !showExpanded && "lg:hidden")}>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/45">Signed in as</p>
-                  <p className="truncate text-sm font-semibold text-white">{viewer?.fullName ?? "Loading..."}</p>
-                  <p className="truncate text-sm text-white/65">{viewer?.email ?? "Fetching session..."}</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Signed in as</p>
+                  <p className="truncate text-sm font-semibold text-ink">{viewer?.fullName ?? "Loading..."}</p>
+                  <p className="truncate text-sm text-ink/60">{viewer?.email ?? "Fetching session..."}</p>
                 </div>
               </div>
 
               {showExpanded ? (
                 <>
-                  <div className="mt-4 rounded-2xl border border-white/10 bg-black/10 px-3 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/45">Team</p>
-                    <p className="mt-1 text-sm font-medium text-white">{viewer?.department ?? "Unassigned"}</p>
+                  <div className="mt-4 rounded-2xl border border-border bg-surface-muted px-3 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Team</p>
+                    <p className="mt-1 text-sm font-medium text-ink">{viewer?.department ?? "Unassigned"}</p>
                   </div>
 
                   <div className="mt-4 flex items-center justify-between gap-3">
@@ -467,7 +488,7 @@ export function UserSidebar({
                         setError(null);
                         setMessage(null);
                       }}
-                      className="rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:border-gold hover:text-gold"
+                      className="rounded-full border border-border px-4 py-2 text-sm font-semibold text-ink transition hover:border-accent hover:bg-accent/5 hover:text-accent"
                     >
                       {editorOpen ? "Hide profile" : "Edit profile"}
                     </button>
@@ -476,39 +497,39 @@ export function UserSidebar({
                       type="button"
                       onClick={handleLogout}
                       disabled={logoutPending}
-                      className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:bg-gold disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {logoutPending ? "Signing out..." : "Logout"}
                     </button>
                   </div>
 
                   {editorOpen ? (
-                    <div className="mt-4 space-y-4 rounded-[24px] border border-white/10 bg-black/10 p-4">
+                    <div className="mt-4 space-y-4 rounded-[24px] border border-border bg-surface-muted/80 p-4">
                       <div className="space-y-1">
-                        <p className="text-sm font-semibold text-white">Update your profile</p>
-                        <p className="text-xs leading-6 text-white/55">
+                        <p className="text-sm font-semibold text-ink">Update your profile</p>
+                        <p className="text-xs leading-6 text-ink/55">
                           Multiple people can share the same department, so your name and email help identify who is
                           making updates.
                         </p>
                       </div>
 
                       <label className="block space-y-2">
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/45">Name</span>
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Name</span>
                         <input
                           value={form.fullName}
                           onChange={(event) => setForm((current) => ({ ...current, fullName: event.target.value }))}
-                          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-gold"
+                          className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm text-ink outline-none transition placeholder:text-ink/25"
                           placeholder="Your full name"
                         />
                       </label>
 
                       <label className="block space-y-2">
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/45">Email</span>
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Email</span>
                         <input
                           type="email"
                           value={form.email}
                           onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
-                          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-gold"
+                          className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm text-ink outline-none transition placeholder:text-ink/25"
                           placeholder="name@company.com"
                         />
                       </label>
@@ -518,7 +539,7 @@ export function UserSidebar({
                           type="button"
                           onClick={handleProfileSave}
                           disabled={savePending || !viewer}
-                          className="rounded-full bg-gold px-4 py-2 text-sm font-semibold text-ink transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {savePending ? "Saving..." : "Save changes"}
                         </button>
@@ -532,7 +553,7 @@ export function UserSidebar({
                             setEditorOpen(false);
                             setError(null);
                           }}
-                          className="rounded-full border border-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/30"
+                          className="rounded-full border border-border px-4 py-2 text-sm font-semibold text-ink transition hover:border-accent hover:bg-white"
                         >
                           Cancel
                         </button>
@@ -540,18 +561,18 @@ export function UserSidebar({
                     </div>
                   ) : null}
 
-                  {message ? <p className="mt-4 rounded-2xl bg-pine/20 px-3 py-2 text-sm text-white">{message}</p> : null}
-                  {error ? <p className="mt-4 rounded-2xl bg-ember/20 px-3 py-2 text-sm text-white">{error}</p> : null}
+                  {message ? <p className="mt-4 rounded-2xl border border-border bg-surface-muted px-3 py-2 text-sm text-ink">{message}</p> : null}
+                  {error ? <p className="mt-4 rounded-2xl border border-border bg-surface-muted px-3 py-2 text-sm text-ink">{error}</p> : null}
                 </>
               ) : (
-                <div className="mt-4 hidden lg:block">
+                <div className="mt-3 hidden lg:flex justify-center">
                   <button
                     type="button"
                     onClick={handleLogout}
                     disabled={logoutPending}
                     aria-label="Logout"
                     title="Logout"
-                    className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white transition hover:border-gold hover:text-gold disabled:opacity-60"
+                    className="flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-white text-ink transition hover:border-accent hover:bg-accent/5 hover:text-accent disabled:opacity-60"
                   >
                     <LogoutIcon className="h-5 w-5" />
                   </button>
@@ -564,3 +585,4 @@ export function UserSidebar({
     </>
   );
 }
+

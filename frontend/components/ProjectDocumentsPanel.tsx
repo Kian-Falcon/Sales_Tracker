@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type ChangeEvent } from "react";
 
+import { useToast } from "@/components/ToastProvider";
 import { uploadProjectDocument } from "@/lib/api";
 import type { Department, ProjectDocument } from "@/lib/types";
 import { formatDateTime, formatFileSize } from "@/lib/utils";
@@ -12,17 +13,20 @@ const acceptedDocumentTypes = ".pdf,.csv,.xls,.xlsx,.doc,.docx,.txt,.zip,.png,.j
 export function ProjectDocumentsPanel({
   projectId,
   documents,
-  viewerDepartment
+  viewerDepartment,
+  onDocumentUpload
 }: {
   projectId: string;
   documents: ProjectDocument[];
   viewerDepartment?: Department;
+  onDocumentUpload?: (document: ProjectDocument) => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const canUpload = viewerDepartment === "Sales" || viewerDepartment === "Admin";
+  const { pushToast } = useToast();
 
   const handleUpload = () => {
     if (!selectedFile) {
@@ -33,8 +37,14 @@ export function ProjectDocumentsPanel({
     startTransition(() => {
       void (async () => {
         try {
-          await uploadProjectDocument(projectId, selectedFile, "boq");
+          const uploadedDocument = await uploadProjectDocument(projectId, selectedFile, "boq");
           setSelectedFile(null);
+          onDocumentUpload?.(uploadedDocument);
+          pushToast({
+            tone: "success",
+            title: "BOQ uploaded",
+            description: "The file is now attached to this project record."
+          });
           router.refresh();
         } catch (caughtError) {
           setError(caughtError instanceof Error ? caughtError.message : "Unable to upload the document.");
@@ -51,34 +61,38 @@ export function ProjectDocumentsPanel({
     <section className="rounded-[32px] border border-ink/10 bg-white p-6 shadow-panel">
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-pine">Documents</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">Documents</p>
           <h2 className="text-2xl font-semibold text-ink">BOQ and project files</h2>
           <p className="max-w-2xl text-sm text-ink/60">
-            Keep the latest BOQ close to the workflow so Sales, R&amp;D, and production teams can open it quickly.
+            Keep the latest BOQ close to the workflow so Sales, R&D, and production teams can open it quickly.
           </p>
         </div>
 
         {canUpload ? (
-          <div className="w-full rounded-[24px] border border-dashed border-ink/15 bg-sand/35 p-4 lg:max-w-md">
+          <div className="w-full rounded-[24px] border border-dashed border-ink/15 bg-surface-muted/35 p-4 lg:max-w-md">
             <input
               type="file"
               accept={acceptedDocumentTypes}
               onChange={handleFileChange}
-              className="block w-full text-sm text-ink/70 file:mr-4 file:rounded-full file:border-0 file:bg-ink file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-pine"
+              className="block w-full text-sm text-ink/70 file:mr-4 file:rounded-full file:border-0 file:bg-accent file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-accent/90"
             />
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 disabled={!selectedFile || pending}
                 onClick={handleUpload}
-                className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-white transition hover:bg-pine disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {pending ? "Uploading..." : "Upload BOQ"}
               </button>
-              {selectedFile ? <span className="text-sm text-pine">{selectedFile.name}</span> : null}
+              {selectedFile ? <span className="text-sm text-ink/70">{selectedFile.name}</span> : null}
             </div>
             <p className="mt-2 text-xs text-ink/45">Sales and Admin can add or replace BOQ files at any time.</p>
-            {error ? <p className="mt-3 text-sm text-ember">{error}</p> : null}
+            {error ? (
+              <p className="mt-3 rounded-2xl border border-danger/15 bg-danger/5 px-3 py-2 text-sm text-danger">
+                {error}
+              </p>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -88,7 +102,7 @@ export function ProjectDocumentsPanel({
           documents.map((document) => (
             <article
               key={document.id}
-              className="flex flex-col gap-4 rounded-[24px] border border-ink/10 bg-sand/30 p-4 md:flex-row md:items-center md:justify-between"
+              className="flex flex-col gap-4 rounded-[24px] border border-ink/10 bg-surface-muted/30 p-4 md:flex-row md:items-center md:justify-between"
             >
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -102,7 +116,7 @@ export function ProjectDocumentsPanel({
                   {document.uploaded_by_name ? ` by ${document.uploaded_by_name}` : ""}
                 </p>
                 <p className="text-xs text-ink/45">
-                  {document.content_type} • {formatFileSize(document.file_size)}
+                  {document.content_type} - {formatFileSize(document.file_size)}
                 </p>
               </div>
 
@@ -111,7 +125,7 @@ export function ProjectDocumentsPanel({
                   href={document.download_url}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex rounded-full border border-ink px-4 py-2 text-sm font-semibold text-ink transition hover:bg-ink hover:text-white"
+                  className="inline-flex rounded-full border border-border px-4 py-2 text-sm font-semibold text-ink transition hover:border-accent hover:bg-accent hover:text-white"
                 >
                   Open file
                 </a>
@@ -121,7 +135,7 @@ export function ProjectDocumentsPanel({
             </article>
           ))
         ) : (
-          <div className="rounded-[24px] border border-ink/10 bg-sand/25 px-4 py-5 text-sm text-ink/55">
+          <div className="rounded-[24px] border border-ink/10 bg-surface-muted/25 px-4 py-5 text-sm text-ink/55">
             No BOQ uploaded yet. Add the first file from Sales or Admin when it is ready.
           </div>
         )}

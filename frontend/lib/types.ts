@@ -75,10 +75,12 @@ export interface Stage {
 
 export interface StageSnapshot {
   id: string;
+  stage_key: string | null;
   name: string;
   phase: StagePhase;
   responsible_dept: Department;
   status: StageStatus;
+  sort_order: number | null;
   activated_at: string | null;
   due_date: string | null;
 }
@@ -94,6 +96,8 @@ export interface ProjectSummary {
   estimated_tat_days: number | null;
   total_order_value: number | null;
   number_of_stores: number | null;
+  completed_stages: number;
+  total_stages: number;
   created_at: string;
   is_archived: boolean;
   current_stage: StageSnapshot | null;
@@ -240,10 +244,13 @@ export interface ProjectCreateInput {
 }
 
 export interface ProjectMetadataUpdateInput {
-  assigned_person_name: string;
-  priority: ProjectPriority;
-  estimated_tat_days: number | null;
-  total_order_value: number | null;
+  name?: string;
+  client?: string;
+  assigned_person_name?: string;
+  priority?: ProjectPriority;
+  estimated_tat_days?: number | null;
+  total_order_value?: number | null;
+  number_of_stores?: number | null;
   special_request?: string | null;
 }
 

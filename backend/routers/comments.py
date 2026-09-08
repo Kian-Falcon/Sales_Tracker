@@ -10,6 +10,7 @@ from database import get_pool, record_to_dict, set_audit_actor, transaction
 from models.comment import CommentCreate, CommentRead
 from models.common import CurrentUser, Department
 from models.profile import MentionableProfileRead
+from services.airtable_sync import sync_project_tree
 from services.notification import NotificationService
 
 router = APIRouter(prefix="/api/v1/stages", tags=["comments"])
@@ -179,5 +180,10 @@ async def add_comment(
             background_tasks.add_task(_send_comment_mention_task, settings, mention_notification_payload)
         else:
             await _send_comment_mention_task(settings, mention_notification_payload)
+
+    if background_tasks is not None:
+        background_tasks.add_task(sync_project_tree, pool, settings, stage["project_id"])
+    else:
+        await sync_project_tree(pool, settings, stage["project_id"])
 
     return inserted_comment

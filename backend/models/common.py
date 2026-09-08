@@ -57,6 +57,8 @@ class StageSnapshot(BaseModel):
     phase: StagePhase
     responsible_dept: Department
     status: StageStatus
+    stage_key: str | None = None
+    sort_order: int | None = None
     activated_at: datetime | None = None
     due_date: date | None = None
 

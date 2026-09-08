@@ -15,6 +15,7 @@ from models.stage import (
     StageDueDateUpdate,
 )
 from routers.projects import load_project_detail
+from services.airtable_sync import sync_project_tree
 from services.notification import NotificationService
 from services.workflow_settings import get_due_days_by_stage_key
 
@@ -224,6 +225,11 @@ async def complete_stage(
         else:
             await _send_stage_handoff_notification_task(settings, notification_payload)
 
+    if background_tasks is not None:
+        background_tasks.add_task(sync_project_tree, pool, settings, stage["project_id"])
+    else:
+        await sync_project_tree(pool, settings, stage["project_id"])
+
     return detail
 
 
@@ -231,7 +237,9 @@ async def complete_stage(
 async def set_stage_due_date(
     stage_id: UUID,
     payload: StageDueDateUpdate,
+    background_tasks: BackgroundTasks = None,
     pool=Depends(get_pool),
+    settings: Settings = Depends(get_settings),
     user: CurrentUser = Depends(get_current_user),
 ) -> ProjectDetail:
     async with transaction(pool) as connection:
@@ -276,11 +284,18 @@ async def set_stage_due_date(
             payload.due_date,
         )
 
-        return await load_project_detail(
+        detail = await load_project_detail(
             connection,
             stage["project_id"],
             viewer_department=user.department,
         )
+
+    if background_tasks is not None:
+        background_tasks.add_task(sync_project_tree, pool, settings, stage["project_id"])
+    else:
+        await sync_project_tree(pool, settings, stage["project_id"])
+
+    return detail
 
 
 @router.post("/{stage_id}/due-date-requests", response_model=ProjectDetail, status_code=status.HTTP_201_CREATED)
@@ -397,6 +412,11 @@ async def request_stage_due_date_change(
             background_tasks.add_task(_send_due_date_change_request_task, settings, notification_payload)
         else:
             await _send_due_date_change_request_task(settings, notification_payload)
+
+    if background_tasks is not None:
+        background_tasks.add_task(sync_project_tree, pool, settings, stage["project_id"])
+    else:
+        await sync_project_tree(pool, settings, stage["project_id"])
 
     return detail
 
@@ -515,5 +535,10 @@ async def review_stage_due_date_request(
             background_tasks.add_task(_send_due_date_change_resolution_task, settings, notification_payload)
         else:
             await _send_due_date_change_resolution_task(settings, notification_payload)
+
+    if background_tasks is not None:
+        background_tasks.add_task(sync_project_tree, pool, settings, request_row["project_id"])
+    else:
+        await sync_project_tree(pool, settings, request_row["project_id"])
 
     return detail

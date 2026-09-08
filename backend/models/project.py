@@ -20,8 +20,10 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectUpdate(BaseModel):
-    assigned_person_name: str = Field(min_length=1, max_length=255)
-    priority: ProjectPriority = ProjectPriority.NORMAL
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    client: str | None = Field(default=None, min_length=1, max_length=255)
+    assigned_person_name: str | None = Field(default=None, min_length=1, max_length=255)
+    priority: ProjectPriority | None = None
     estimated_tat_days: int | None = Field(default=None, ge=1, le=3650)
     total_order_value: float | None = Field(default=None, ge=0)
     number_of_stores: int | None = Field(default=None, ge=1, le=100000)
@@ -54,6 +56,8 @@ class ProjectSummary(BaseModel):
     estimated_tat_days: int | None = None
     total_order_value: float | None = None
     number_of_stores: int | None = None
+    completed_stages: int = 0
+    total_stages: int = 0
     created_at: datetime
     is_archived: bool
     current_stage: StageSnapshot | None = None

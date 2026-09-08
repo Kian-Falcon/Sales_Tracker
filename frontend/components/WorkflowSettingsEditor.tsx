@@ -111,7 +111,7 @@ export function WorkflowSettingsEditor({
     <div className="space-y-6">
       <section className="rounded-[32px] border border-ink/10 bg-white p-6 shadow-panel">
         <div className="space-y-3">
-          <span className="inline-flex rounded-full bg-sand px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-ink/70">
+          <span className="inline-flex rounded-full bg-surface-muted px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-ink/70">
             Admin controls
           </span>
           <h1 className="text-3xl font-semibold text-ink">Workflow settings</h1>
@@ -126,7 +126,7 @@ export function WorkflowSettingsEditor({
             type="button"
             onClick={() => void handleSaveAll()}
             disabled={!hasChanges || updateWorkflowSettings.isPending}
-            className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-white transition hover:bg-pine disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {saveTarget === "all" && updateWorkflowSettings.isPending ? "Saving..." : "Save all changes"}
           </button>
@@ -134,15 +134,13 @@ export function WorkflowSettingsEditor({
             type="button"
             onClick={() => setSettings(savedSettings)}
             disabled={!hasChanges || updateWorkflowSettings.isPending}
-            className="rounded-full border border-ink px-4 py-2 text-sm font-medium text-ink transition hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-full border border-border px-4 py-2 text-sm font-medium text-ink transition hover:border-accent hover:bg-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
             Reset unsaved changes
           </button>
-          {updateWorkflowSettings.isSuccess && !hasChanges ? (
-            <span className="text-sm text-pine">Workflow settings saved.</span>
-          ) : null}
+          {updateWorkflowSettings.isSuccess && !hasChanges ? <span className="text-sm text-ink/70">Workflow settings saved.</span> : null}
           {updateWorkflowSettings.error ? (
-            <span className="text-sm text-ember">{updateWorkflowSettings.error.message}</span>
+            <span className="text-sm text-ink">{updateWorkflowSettings.error.message}</span>
           ) : null}
         </div>
       </section>
@@ -198,7 +196,7 @@ export function WorkflowSettingsEditor({
                           )
                         )
                       }
-                      className="w-full rounded-2xl border border-ink/10 bg-sand/50 px-3 py-2 text-sm outline-none transition focus:border-gold"
+                      className="w-full rounded-2xl border border-ink/10 bg-surface-muted/50 px-3 py-2 text-sm outline-none transition focus:border-accent"
                     >
                       {departmentOptions.map((department) => (
                         <option key={department} value={department}>
@@ -230,7 +228,7 @@ export function WorkflowSettingsEditor({
                           )
                         )
                       }
-                      className="w-full rounded-2xl border border-ink/10 bg-sand/50 px-3 py-2 text-sm outline-none transition focus:border-gold"
+                      className="w-full rounded-2xl border border-ink/10 bg-surface-muted/50 px-3 py-2 text-sm outline-none transition focus:border-accent"
                       placeholder="No auto SLA"
                     />
                   </label>
@@ -243,7 +241,7 @@ export function WorkflowSettingsEditor({
                       type="button"
                       onClick={() => void handleRowSave(setting.stage_key)}
                       disabled={!rowHasChanges(setting.stage_key) || updateWorkflowSettings.isPending}
-                      className="w-full rounded-full border border-ink px-4 py-2 text-sm font-medium text-ink transition hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                      className="w-full rounded-full border border-border bg-white px-4 py-2 text-sm font-medium text-ink transition hover:border-accent hover:bg-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {saveTarget === setting.stage_key && updateWorkflowSettings.isPending
                         ? "Saving..."
@@ -251,7 +249,7 @@ export function WorkflowSettingsEditor({
                           ? "Save row"
                           : "Saved"}
                     </button>
-                    <p className={`text-xs ${rowHasChanges(setting.stage_key) ? "text-gold" : "text-ink/45"}`}>
+                    <p className={`text-xs ${rowHasChanges(setting.stage_key) ? "text-ink/60" : "text-ink/45"}`}>
                       {rowHasChanges(setting.stage_key) ? "Unsaved row changes" : "No row changes"}
                     </p>
                   </div>
@@ -264,3 +262,4 @@ export function WorkflowSettingsEditor({
     </div>
   );
 }
+

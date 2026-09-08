@@ -173,6 +173,48 @@ def _format_date_label(value: str | None) -> str:
         return value
 
 
+def _format_csv_date(value: date | None, *, empty_label: str = "") -> str:
+    if value is None:
+        return empty_label
+
+    return value.strftime("%d %b %Y")
+
+
+def _format_csv_datetime(value: datetime | None, *, empty_label: str = "") -> str:
+    if value is None:
+        return empty_label
+
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).strftime("%d %b %Y, %I:%M %p UTC")
+
+    return value.strftime("%d %b %Y, %I:%M %p")
+
+
+def _format_csv_currency(value: float | int | None, *, empty_label: str = "Not set") -> str:
+    if value is None:
+        return empty_label
+
+    return f"INR {float(value):,.2f}"
+
+
+def _format_csv_percent(value: float | None, *, empty_label: str = "0%") -> str:
+    if value is None:
+        return empty_label
+
+    return f"{value:.1f}%"
+
+
+def _format_csv_delay(value: float | int | None, *, empty_label: str = "-") -> str:
+    if value is None:
+        return empty_label
+
+    numeric = float(value)
+    if numeric.is_integer():
+        return f"{int(numeric)} day{'s' if int(numeric) != 1 else ''}"
+
+    return f"{numeric:.1f} days"
+
+
 def _build_audit_details(row: dict) -> str:
     if row["event_type"] == "Comment added":
         return _shorten_text(row.get("comment_text"), limit=160)
@@ -621,15 +663,16 @@ async def export_monthly_report_csv(
         )
 
     buffer = StringIO()
+    buffer.write("\ufeff")
     csv_writer = writer(buffer)
 
-    csv_writer.writerow(["Monthly workflow report", report.month])
-    csv_writer.writerow(["Period", report.period_start.isoformat(), report.period_end.isoformat()])
-    csv_writer.writerow(["Generated at", report.generated_at.isoformat()])
+    csv_writer.writerow(["Kian Falcon Workflow Report", report.month])
+    csv_writer.writerow(["Reporting period", _format_csv_date(report.period_start), _format_csv_date(report.period_end)])
+    csv_writer.writerow(["Generated at", _format_csv_datetime(report.generated_at)])
     csv_writer.writerow([])
 
     csv_writer.writerow(["Overview"])
-    csv_writer.writerow(["metric", "value"])
+    csv_writer.writerow(["Metric", "Value"])
     csv_writer.writerow(["Projects in scope", report.overview.projects_in_scope])
     csv_writer.writerow(["Projects created", report.overview.projects_created])
     csv_writer.writerow(["Active projects", report.overview.active_projects])
@@ -638,22 +681,23 @@ async def export_monthly_report_csv(
     csv_writer.writerow(["Stages completed", report.overview.stages_completed])
     csv_writer.writerow(["Overdue events", report.overview.overdue_events])
     csv_writer.writerow(["Comments logged", report.overview.comments_logged])
-    csv_writer.writerow(["Total pipeline value", report.overview.total_pipeline_value])
+    csv_writer.writerow(["Total pipeline value", _format_csv_currency(report.overview.total_pipeline_value)])
+    csv_writer.writerow(["Stores in scope", report.overview.stores_in_scope])
     csv_writer.writerow([])
 
     csv_writer.writerow(["Departments"])
     csv_writer.writerow(
         [
-            "department",
-            "total_stages",
-            "completed_total",
-            "completed_this_month",
-            "active_now",
-            "overdue_now",
-            "pending_now",
-            "completion_rate",
-            "avg_completion_days",
-            "avg_delay_days",
+            "Department",
+            "Total Stages",
+            "Completed Total",
+            "Completed This Month",
+            "Active Now",
+            "Overdue Now",
+            "Pending Now",
+            "Completion Rate",
+            "Average Completion Time",
+            "Average Delay",
         ]
     )
     for department in report.departments:
@@ -666,9 +710,9 @@ async def export_monthly_report_csv(
                 department.active_now,
                 department.overdue_now,
                 department.pending_now,
-                department.completion_rate,
-                department.avg_completion_days,
-                department.avg_delay_days,
+                _format_csv_percent(department.completion_rate),
+                _format_csv_delay(department.avg_completion_days),
+                _format_csv_delay(department.avg_delay_days),
             ]
         )
     csv_writer.writerow([])
@@ -676,26 +720,26 @@ async def export_monthly_report_csv(
     csv_writer.writerow(["Projects"])
     csv_writer.writerow(
         [
-            "project_code",
-            "project_name",
-            "client",
-            "priority",
-            "assigned_person_name",
-            "total_order_value",
-            "status_label",
-            "current_stage_name",
-            "current_stage_department",
-            "current_stage_status",
-            "current_stage_due_date",
-            "completed_stages",
-            "total_stages",
-            "active_stages",
-            "overdue_stages",
-            "pending_stages",
-            "completed_this_month",
-            "completion_rate",
-            "current_delay_days",
-            "created_at",
+            "Project Code",
+            "Project Name",
+            "Client",
+            "Priority",
+            "Assigned Person",
+            "Order Value (INR)",
+            "Project Status",
+            "Current Stage",
+            "Current Team",
+            "Current Stage Status",
+            "Current Due Date",
+            "Completed Stages",
+            "Total Stages",
+            "Active Stages",
+            "Overdue Stages",
+            "Pending Stages",
+            "Completed This Month",
+            "Completion Rate",
+            "Current Delay",
+            "Created On",
         ]
     )
     for project in report.projects:
@@ -704,23 +748,23 @@ async def export_monthly_report_csv(
                 project.project_code,
                 project.project_name,
                 project.client,
-                project.priority.value,
-                project.assigned_person_name,
-                project.total_order_value,
+                project.priority.value.title(),
+                project.assigned_person_name or "Unassigned",
+                _format_csv_currency(project.total_order_value),
                 project.status_label,
-                project.current_stage_name,
+                project.current_stage_name or "Completed workflow",
                 project.current_stage_department.value if project.current_stage_department else None,
-                project.current_stage_status,
-                project.current_stage_due_date.isoformat() if project.current_stage_due_date else None,
+                project.current_stage_status.title() if project.current_stage_status else None,
+                _format_csv_date(project.current_stage_due_date, empty_label="-"),
                 project.completed_stages,
                 project.total_stages,
                 project.active_stages,
                 project.overdue_stages,
                 project.pending_stages,
                 project.completed_this_month,
-                project.completion_rate,
-                project.current_delay_days,
-                project.created_at.isoformat(),
+                _format_csv_percent(project.completion_rate),
+                _format_csv_delay(project.current_delay_days),
+                _format_csv_datetime(project.created_at),
             ]
         )
     csv_writer.writerow([])
@@ -728,21 +772,21 @@ async def export_monthly_report_csv(
     csv_writer.writerow(["Weekly trends"])
     csv_writer.writerow(
         [
-            "label",
-            "period_start",
-            "period_end",
-            "projects_created",
-            "stages_completed",
-            "overdue_events",
-            "comments_logged",
+            "Label",
+            "Period Start",
+            "Period End",
+            "Projects Created",
+            "Stages Completed",
+            "Overdue Events",
+            "Comments Logged",
         ]
     )
     for trend in report.trends:
         csv_writer.writerow(
             [
                 trend.label,
-                trend.period_start.isoformat(),
-                trend.period_end.isoformat(),
+                _format_csv_date(trend.period_start),
+                _format_csv_date(trend.period_end),
                 trend.projects_created,
                 trend.stages_completed,
                 trend.overdue_events,
@@ -754,20 +798,20 @@ async def export_monthly_report_csv(
     csv_writer.writerow(["Audit feed"])
     csv_writer.writerow(
         [
-            "changed_at",
-            "event_type",
-            "project_code",
-            "project_name",
-            "stage_name",
-            "actor_name",
-            "actor_email",
-            "details",
+            "Changed At",
+            "Event Type",
+            "Project Code",
+            "Project Name",
+            "Stage Name",
+            "Actor Name",
+            "Actor Email",
+            "Details",
         ]
     )
     for event in report.audit_events:
         csv_writer.writerow(
             [
-                event.changed_at.isoformat(),
+                _format_csv_datetime(event.changed_at),
                 event.event_type,
                 event.project_code,
                 event.project_name,

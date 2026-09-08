@@ -4,14 +4,69 @@
 
 :root {
   color-scheme: light;
+  --color-ink: #18181b;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f4f4f5;
+  --color-border: #e4e4e7;
+  --color-accent: #2563eb;
+  --color-success: #16a34a;
+  --color-warning: #ca8a04;
+  --color-danger: #dc2626;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--color-surface);
 }
 
 body {
   min-height: 100vh;
-  background: linear-gradient(180deg, #f6f1e9 0%, #f2ede5 100%);
-  color: #161616;
+  font-family: var(--font-body), Inter, system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+label,
+button,
+th {
+  font-family: var(--font-display), Manrope, system-ui, sans-serif;
+}
+
+input,
+select,
+textarea,
+table,
+td,
+th {
+  font-variant-numeric: tabular-nums;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--color-accent) !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
 a {
   text-decoration: none;
+  color: var(--color-accent);
+}
+
+a:hover {
+  color: var(--color-ink);
+}
+
+::selection {
+  background: rgba(37, 99, 235, 0.16);
 }

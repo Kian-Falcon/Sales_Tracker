@@ -42,12 +42,12 @@ export default async function WorkflowSettingsPage() {
 
   return (
     <div className="space-y-8">
-      <Link href="/dashboard" className="text-sm font-medium text-pine hover:text-ink">
+      <Link href="/dashboard" className="text-sm font-medium text-accent hover:text-ink">
         Back to dashboard
       </Link>
 
       {error ? (
-        <section className="rounded-[32px] border border-gold/40 bg-white p-8 shadow-panel">
+        <section className="rounded-[32px] border border-border bg-white p-8 shadow-panel">
           <h1 className="text-3xl font-semibold text-ink">Workflow settings unavailable</h1>
           <p className="mt-3 text-sm text-ink/60">{error}</p>
         </section>
@@ -57,3 +57,4 @@ export default async function WorkflowSettingsPage() {
     </div>
   );
 }
+

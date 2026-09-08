@@ -27,9 +27,10 @@ export function MonthlyReportExportButton({ month }: { month: string }) {
       type="button"
       disabled={pending}
       onClick={() => void handleClick()}
-      className="rounded-full border border-white/15 px-4 py-2 text-sm font-semibold text-white transition hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:opacity-60"
+      className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-60"
     >
       {pending ? "Preparing report..." : "Export monthly CSV"}
     </button>
   );
 }
+

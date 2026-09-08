@@ -52,7 +52,7 @@ export function LoginForm() {
           required
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          className="w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm outline-none transition focus:border-gold"
+          className="w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm outline-none transition focus:border-accent"
           placeholder="sales@kianfalcon.com"
         />
       </div>
@@ -65,22 +65,23 @@ export function LoginForm() {
         placeholder="Enter your password"
       />
 
-      {error ? <p className="rounded-2xl bg-ember/10 px-4 py-3 text-sm text-ember">{error}</p> : null}
+      {error ? <p className="rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-ink">{error}</p> : null}
 
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-pine disabled:cursor-not-allowed disabled:opacity-70"
+        className="w-full rounded-full bg-accent px-5 py-3 text-sm font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-70"
       >
         {pending ? "Signing in..." : "Sign in"}
       </button>
 
       <p className="text-center text-sm text-ink/60">
         New here?{" "}
-        <Link href="/signup" className="font-semibold text-pine transition hover:text-ink">
+        <Link href="/signup" className="font-semibold text-accent transition hover:text-ink">
           Create an account
         </Link>
       </p>
     </form>
   );
 }
+

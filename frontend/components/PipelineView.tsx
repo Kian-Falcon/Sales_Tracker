@@ -2,22 +2,33 @@
 
 import { useEffect, useState } from "react";
 
+import { StageRow } from "@/components/StageRow";
 import type { Department, ProjectDetail } from "@/lib/types";
 import { phaseOrder, titleCasePhase } from "@/lib/utils";
-import { StageRow } from "@/components/StageRow";
 
 export function PipelineView({
   project: initialProject,
-  viewerDepartment
+  viewerDepartment,
+  viewerName,
+  onProjectChange,
+  onProjectSyncStateChange
 }: {
   project: ProjectDetail;
   viewerDepartment?: Department;
+  viewerName?: string | null;
+  onProjectChange?: (project: ProjectDetail) => void;
+  onProjectSyncStateChange?: (projectId: string, label: string | null) => void;
 }) {
   const [project, setProject] = useState(initialProject);
 
   useEffect(() => {
     setProject(initialProject);
   }, [initialProject]);
+
+  const handleProjectUpdate = (updatedProject: ProjectDetail) => {
+    setProject(updatedProject);
+    onProjectChange?.(updatedProject);
+  };
 
   return (
     <div className="space-y-8">
@@ -39,9 +50,12 @@ export function PipelineView({
               {stages.map((stage) => (
                 <StageRow
                   key={stage.id}
+                  project={project}
                   stage={stage}
                   viewerDepartment={viewerDepartment}
-                  onProjectChange={setProject}
+                  viewerName={viewerName}
+                  onProjectChange={handleProjectUpdate}
+                  onProjectSyncStateChange={onProjectSyncStateChange}
                 />
               ))}
             </div>

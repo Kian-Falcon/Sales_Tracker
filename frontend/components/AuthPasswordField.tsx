@@ -57,7 +57,7 @@ export function AuthPasswordField({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           autoComplete={autoComplete}
-          className="w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 pr-12 text-sm outline-none transition focus:border-gold"
+          className="w-full rounded-2xl border border-border bg-white px-4 py-3 pr-12 text-sm outline-none transition focus:border-accent"
           placeholder={placeholder}
         />
 
@@ -65,7 +65,7 @@ export function AuthPasswordField({
           type="button"
           onClick={() => setVisible((current) => !current)}
           aria-label={visible ? "Hide password" : "Show password"}
-          className="absolute inset-y-0 right-3 my-auto flex h-9 w-9 items-center justify-center rounded-full text-ink/45 transition hover:bg-sand/70 hover:text-ink"
+          className="absolute inset-y-0 right-3 my-auto flex h-9 w-9 items-center justify-center rounded-full text-ink/45 transition hover:bg-surface-muted/70 hover:text-ink"
         >
           <EyeIcon open={visible} />
         </button>
@@ -73,3 +73,4 @@ export function AuthPasswordField({
     </div>
   );
 }
+

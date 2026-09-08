@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from auth import require_departments
+from config import Settings, get_settings
 from database import get_pool, set_audit_actor, transaction
 from models.common import CurrentUser, Department
 from models.workflow_settings import (
     WorkflowStageSettingRead,
     WorkflowStageSettingUpdateRequest,
 )
+from services.airtable_sync import sync_workflow_settings_to_airtable
 from services.workflow_settings import fetch_workflow_settings_rows
 
 router = APIRouter(prefix="/api/v1/workflow-settings", tags=["workflow-settings"])
@@ -24,7 +26,9 @@ async def list_workflow_settings(
 @router.put("", response_model=list[WorkflowStageSettingRead])
 async def update_workflow_settings(
     payload: WorkflowStageSettingUpdateRequest,
+    background_tasks: BackgroundTasks = None,
     pool=Depends(get_pool),
+    settings: Settings = Depends(get_settings),
     user: CurrentUser = Depends(require_departments(Department.ADMIN)),
 ) -> list[WorkflowStageSettingRead]:
     async with transaction(pool) as connection:
@@ -80,5 +84,10 @@ async def update_workflow_settings(
         )
 
         updated_rows = await fetch_workflow_settings_rows(connection)
+
+    if background_tasks is not None:
+        background_tasks.add_task(sync_workflow_settings_to_airtable, pool, settings)
+    else:
+        await sync_workflow_settings_to_airtable(pool, settings)
 
     return [WorkflowStageSettingRead(**row) for row in updated_rows]

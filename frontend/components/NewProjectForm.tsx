@@ -65,12 +65,12 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
             try {
               await uploadProjectDocument(project.id, boqFile, "boq");
             } catch {
-              router.push(`/projects/${project.id}?upload=failed`);
+              router.push(`/dashboard?project=${project.id}&panel=documents&upload=failed`);
               return;
             }
           }
 
-          router.push(`/projects/${project.id}`);
+          router.push(`/dashboard?project=${project.id}`);
         } catch (caughtError) {
           setError(caughtError instanceof Error ? caughtError.message : "Unable to create project.");
         }
@@ -88,7 +88,7 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
         />
         <ReadOnlyField
           label="Created by"
-          value={viewer ? `${viewer.fullName} • ${viewer.department ?? "Unassigned"}` : "Current signed-in user"}
+          value={viewer ? `${viewer.fullName} - ${viewer.department ?? "Unassigned"}` : "Current signed-in user"}
           helper={viewer?.email ?? "This project will be linked to the logged-in account."}
         />
       </div>
@@ -118,7 +118,7 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
           <select
             value={form.priority}
             onChange={(event) => updateField("priority", event.target.value as ProjectPriority)}
-            className="w-full rounded-2xl border border-ink/10 bg-sand/50 px-4 py-3 text-sm outline-none transition focus:border-gold"
+            className="w-full rounded-2xl border border-ink/10 bg-surface-muted/50 px-4 py-3 text-sm outline-none transition focus:border-accent"
           >
             <option value="normal">Normal</option>
             <option value="accelerated">Accelerated (high)</option>
@@ -152,35 +152,33 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
             onChange={(event) => updateField("special_request", event.target.value)}
             placeholder="Optional client note, fast-track request, packaging instruction, or store-specific constraint."
             rows={4}
-            className="w-full rounded-2xl border border-ink/10 bg-sand/50 px-4 py-3 text-sm outline-none transition focus:border-gold"
+            className="w-full rounded-2xl border border-ink/10 bg-surface-muted/50 px-4 py-3 text-sm outline-none transition focus:border-accent"
           />
         </label>
 
         <label className="block space-y-2 lg:col-span-2">
           <span className="text-sm font-medium text-ink/70">BOQ upload</span>
-          <div className="rounded-[24px] border border-dashed border-ink/15 bg-sand/35 p-4">
+          <div className="rounded-[24px] border border-dashed border-ink/15 bg-surface-muted/35 p-4">
             <input
               type="file"
               accept={acceptedDocumentTypes}
               onChange={handleFileChange}
-              className="block w-full text-sm text-ink/70 file:mr-4 file:rounded-full file:border-0 file:bg-ink file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-pine"
+              className="block w-full text-sm text-ink/70 file:mr-4 file:rounded-full file:border-0 file:bg-accent file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-accent/90"
             />
             <p className="mt-3 text-xs text-ink/45">
               Optional. Supports PDF, CSV, Excel, DOC, images, text, and ZIP uploads for the initial BOQ.
             </p>
-            {boqFile ? (
-              <p className="mt-2 text-sm font-medium text-pine">Selected: {boqFile.name}</p>
-            ) : null}
+            {boqFile ? <p className="mt-2 text-sm font-medium text-ink/70">Selected: {boqFile.name}</p> : null}
           </div>
         </label>
       </div>
 
-      {error ? <p className="rounded-2xl bg-ember/10 px-4 py-3 text-sm text-ember">{error}</p> : null}
+      {error ? <p className="rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-ink">{error}</p> : null}
 
       <button
         type="submit"
         disabled={pending}
-        className="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-pine disabled:cursor-not-allowed disabled:opacity-70"
+        className="rounded-full bg-accent px-5 py-3 text-sm font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-70"
       >
         {pending ? "Creating..." : "Create project"}
       </button>
@@ -221,7 +219,7 @@ function Field({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-2xl border border-ink/10 bg-sand/50 px-4 py-3 text-sm outline-none transition focus:border-gold"
+        className="w-full rounded-2xl border border-ink/10 bg-surface-muted/50 px-4 py-3 text-sm outline-none transition focus:border-accent"
       />
     </label>
   );
@@ -237,10 +235,11 @@ function ReadOnlyField({
   helper: string;
 }) {
   return (
-    <div className="rounded-[24px] border border-ink/10 bg-sand/35 px-4 py-4">
+    <div className="rounded-[24px] border border-ink/10 bg-surface-muted/35 px-4 py-4">
       <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">{label}</div>
       <div className="mt-2 text-sm font-semibold text-ink">{value}</div>
       <div className="mt-1 text-xs text-ink/45">{helper}</div>
     </div>
   );
 }
+

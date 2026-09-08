@@ -9,15 +9,22 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ["var(--font-body)", "Inter", "system-ui", "sans-serif"],
+        display: ["var(--font-display)", "Manrope", "system-ui", "sans-serif"]
+      },
       colors: {
-        ink: "#161616",
-        sand: "#f4f0e8",
-        ember: "#b54830",
-        pine: "#245f50",
-        gold: "#c58f3d"
+        ink: "#18181B",
+        surface: "#FFFFFF",
+        "surface-muted": "#F4F4F5",
+        border: "#E4E4E7",
+        accent: "#2563EB",
+        success: "#16A34A",
+        warning: "#CA8A04",
+        danger: "#DC2626"
       },
       boxShadow: {
-        panel: "0 20px 45px rgba(22, 22, 22, 0.08)"
+        panel: "0 18px 40px rgba(24, 24, 27, 0.08)"
       }
     }
   },
