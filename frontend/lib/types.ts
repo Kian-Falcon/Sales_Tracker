@@ -8,7 +8,7 @@ export type Department =
   | "Admin";
 
 export type ProjectPriority = "normal" | "accelerated";
-export type ProjectDocumentType = "boq" | "attachment";
+export type ProjectDocumentType = "boq" | "costing_boq" | "attachment";
 
 export interface ViewerDetails {
   id: string;
@@ -237,6 +237,7 @@ export interface ProjectCreateInput {
   name: string;
   client: string;
   assigned_person_name: string;
+  assigned_person_email?: string;
   priority: ProjectPriority;
   estimated_tat_days: number;
   total_order_value: number;

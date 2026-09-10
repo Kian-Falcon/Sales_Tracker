@@ -7,6 +7,7 @@ import type {
   ProjectCreateInput,
   ProjectDetail,
   ProjectDocument,
+  ProjectDocumentType,
   ProjectMetadataUpdateInput,
   ProjectSummary,
   WorkflowStageSetting,
@@ -167,10 +168,14 @@ export function createProject(input: ProjectCreateInput, accessToken?: string) {
   );
 }
 
+export function listProjectMentionableUsers(accessToken?: string) {
+  return apiFetch<MentionableUser[]>("/api/v1/projects/meta/mentionable-users", {}, accessToken);
+}
+
 export function uploadProjectDocument(
   projectId: string,
   file: File,
-  documentType: "boq" | "attachment" = "boq",
+  documentType: ProjectDocumentType = "boq",
   accessToken?: string
 ) {
   const formData = new FormData();

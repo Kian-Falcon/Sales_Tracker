@@ -122,6 +122,51 @@ class NotificationService:
             }
         )
 
+    async def send_costing_boq_uploaded(
+        self,
+        *,
+        project_code: str,
+        project_name: str,
+        stage_name: str,
+        file_name: str,
+        uploaded_by_name: str,
+        recipients: list[str],
+        project_url: str | None = None,
+    ) -> None:
+        if not recipients:
+            logger.info("Skipping costing BOQ upload email for %s because no recipients were configured.", project_code)
+            return
+
+        if not self._settings.resend_api_key:
+            logger.info("Resend is not configured. Would have sent costing BOQ upload email to %s.", ", ".join(recipients))
+            return
+
+        project_link = (
+            f'<p><a href="{escape(project_url)}" '
+            'style="display:inline-block;padding:10px 16px;border-radius:999px;'
+            'background:#111111;color:#ffffff;text-decoration:none;font-weight:600;">Open project</a></p>'
+            if project_url
+            else ""
+        )
+
+        resend.Emails.send(
+            {
+                "from": self._settings.email_from,
+                "to": recipients,
+                "subject": f"[COSTING BOQ UPLOADED] {project_code} - {project_name}",
+                "html": (
+                    "<p>R&amp;D has uploaded the completed costing BOQ for review.</p>"
+                    f"<p><strong>Project code:</strong> {escape(project_code)}</p>"
+                    f"<p><strong>Project:</strong> {escape(project_name)}</p>"
+                    f"<p><strong>Active stage:</strong> {escape(stage_name)}</p>"
+                    f"<p><strong>Uploaded by:</strong> {escape(uploaded_by_name)}</p>"
+                    f"<p><strong>File:</strong> {escape(file_name)}</p>"
+                    "<p><strong>Next step:</strong> Review the costing BOQ inside the project documents panel before closing the R&amp;D handoff.</p>"
+                    f"{project_link}"
+                ),
+            }
+        )
+
     async def send_due_date_change_request(
         self,
         *,

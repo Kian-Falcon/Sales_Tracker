@@ -58,10 +58,37 @@ class CreateProjectConnection:
         self.project_id = uuid4()
         self.project = None
         self.stages: list[dict] = []
-        self.recipients = [{"email": "sales@example.com"}, {"email": "rd@example.com"}]
+        self.recipients = [
+            {"email": "admin@example.com"},
+            {"email": "nirvaan@example.com"},
+            {"email": "sales@example.com"},
+        ]
         self.creator_profile = {"display_name": "Sales Lead", "department": Department.SALES.value}
+        self.assigned_person_profile = {
+            "id": uuid4(),
+            "email": "nirvaan@example.com",
+            "display_name": "Nirvaan Sawhney",
+            "department": Department.RD.value,
+        }
+        self.mentionable_rows = [
+            {
+                "id": uuid4(),
+                "display_name": "Admin Lead",
+                "email": "admin@example.com",
+                "department": Department.ADMIN.value,
+            },
+            {
+                "id": uuid4(),
+                "display_name": "Nirvaan Sawhney",
+                "email": "nirvaan@example.com",
+                "department": Department.RD.value,
+            },
+        ]
 
     async def fetchrow(self, sql: str, *args):
+        if "FROM profiles" in sql and "LOWER(email) = $1" in sql:
+            return self.assigned_person_profile
+
         if "FROM profiles" in sql and "display_name" in sql:
             return self.creator_profile
 
@@ -112,6 +139,9 @@ class CreateProjectConnection:
         if "SELECT * FROM stages WHERE project_id = $1 ORDER BY sort_order" in sql:
             return list(self.stages)
 
+        if "ORDER BY display_name, email" in sql:
+            return list(self.mentionable_rows)
+
         if "SELECT DISTINCT email" in sql:
             return list(self.recipients)
 
@@ -126,6 +156,7 @@ class StageWorkflowConnection:
         pending_request: dict | None = None,
         project_row: dict | None = None,
         recipient_rows: list[dict] | None = None,
+        required_document: dict | None = None,
     ) -> None:
         self.current_stage = current_stage
         self.next_stage = next_stage
@@ -135,6 +166,7 @@ class StageWorkflowConnection:
             "name": "Workflow Test Project",
         }
         self.recipient_rows = recipient_rows or []
+        self.required_document = required_document
         self.execute_calls: list[tuple[str, tuple]] = []
 
     async def fetchrow(self, sql: str, *args):
@@ -146,6 +178,9 @@ class StageWorkflowConnection:
 
         if "WHERE project_id = $1" in sql and "sort_order > $2" in sql:
             return self.next_stage
+
+        if "FROM project_documents" in sql and "document_type = $2" in sql:
+            return self.required_document
 
         if "SELECT project_code, name" in sql and "FROM projects" in sql:
             return self.project_row
@@ -372,13 +407,29 @@ class MonthlyReportConnection:
 
 
 class ProjectDocumentPool:
-    def __init__(self, project_id) -> None:
+    def __init__(
+        self,
+        project_id,
+        *,
+        project_row: dict | None = None,
+        recipient_rows: list[dict] | None = None,
+        uploaded_by_name: str = "Sales Lead",
+    ) -> None:
         self.project_id = project_id
         self.document_id = uuid4()
+        self.project_row = project_row or {
+            "id": project_id,
+            "project_code": "P0400",
+            "name": "Document Upload Test",
+            "assigned_person_name": "Nirvaan Sawhney",
+            "active_stage_name": "Costing Shared by R&D",
+        }
+        self.recipient_rows = recipient_rows or []
+        self.uploaded_by_name = uploaded_by_name
 
     async def fetchrow(self, sql: str, *args):
-        if "SELECT id FROM projects" in sql:
-            return {"id": self.project_id}
+        if "FROM projects p" in sql and "active_stage_name" in sql:
+            return self.project_row
 
         if "INSERT INTO project_documents" in sql:
             return {
@@ -391,11 +442,17 @@ class ProjectDocumentPool:
                 "content_type": args[5],
                 "file_size": args[6],
                 "uploaded_by": args[7],
-                "uploaded_by_name": "Sales Lead",
+                "uploaded_by_name": self.uploaded_by_name,
                 "created_at": datetime.now(timezone.utc),
             }
 
         raise AssertionError(f"Unexpected fetchrow SQL: {sql}")
+
+    async def fetch(self, sql: str, *args):
+        if "SELECT DISTINCT email" in sql and "FROM profiles" in sql:
+            return list(self.recipient_rows)
+
+        raise AssertionError(f"Unexpected fetch SQL: {sql}")
 
 
 class DeleteProjectConnection:
@@ -732,6 +789,7 @@ def test_create_project_seeds_first_stage_active_and_dates_it(monkeypatch) -> No
                 client="Acme",
                 brand="Kian",
                 assigned_person_name="Nirvaan Sawhney",
+                assigned_person_email="nirvaan@example.com",
                 priority=ProjectPriority.ACCELERATED,
                 estimated_tat_days=21,
                 total_order_value=125000,
@@ -773,9 +831,30 @@ def test_create_project_seeds_first_stage_active_and_dates_it(monkeypatch) -> No
             "total_order_value": 125000.0,
             "special_request": "Complete sampling before festive launch.",
             "current_stage_name": "Costing SOP Logged In",
-            "recipients": ["sales@example.com", "rd@example.com"],
+            "recipients": ["admin@example.com", "nirvaan@example.com", "sales@example.com"],
             "project_url": f"http://localhost:3000/projects/{connection.project_id}",
         }
+    ]
+
+
+def test_list_project_mentionable_users_returns_directory_for_sales_and_admin(monkeypatch) -> None:
+    connection = CreateProjectConnection()
+    patch_transaction(monkeypatch, projects, connection)
+
+    result = run_async(
+        projects.list_project_mentionable_users(
+            pool=object(),
+            user=make_user(Department.SALES),
+        )
+    )
+
+    assert [profile.email for profile in result] == [
+        "admin@example.com",
+        "nirvaan@example.com",
+    ]
+    assert [profile.display_name for profile in result] == [
+        "Admin Lead",
+        "Nirvaan Sawhney",
     ]
 
 
@@ -783,11 +862,12 @@ def test_complete_stage_marks_done_and_activates_next_stage(monkeypatch) -> None
     current = stage_row(
         responsible_dept=Department.RD.value,
         status=StageStatus.ACTIVE.value,
-        stage_key="costing_shared_rd",
+        stage_key="sample_completed_rd",
+        name="Sample Completed by R&D",
     )
     next_stage = stage_row(
-        stage_key="costing_revision_items",
-        responsible_dept=Department.RD.value,
+        stage_key="samples_shared_client",
+        responsible_dept=Department.DISPATCH.value,
         status=StageStatus.PENDING.value,
         sort_order=20,
         due_date=None,
@@ -801,7 +881,7 @@ def test_complete_stage_marks_done_and_activates_next_stage(monkeypatch) -> None
     patch_audit_actor(monkeypatch, stages, audit_calls)
 
     async def fake_due_days(_connection):
-        return {"costing_revision_items": 5}
+        return {"samples_shared_client": 5}
 
     async def fake_load_project_detail(_connection, project_id, *args, **kwargs):
         return {"project_id": str(project_id), "refreshed": True}
@@ -826,6 +906,33 @@ def test_complete_stage_marks_done_and_activates_next_stage(monkeypatch) -> None
     assert "SET status = 'active'" in connection.execute_calls[1][0]
     assert connection.execute_calls[1][1] == (next_stage["id"], 5)
     assert audit_calls == [user.user_id]
+
+
+def test_complete_stage_requires_costing_boq_before_rd_costing_can_finish(monkeypatch) -> None:
+    current = stage_row(
+        responsible_dept=Department.RD.value,
+        status=StageStatus.ACTIVE.value,
+        stage_key="costing_shared_rd",
+        name="Costing Shared by R&D",
+    )
+    connection = StageWorkflowConnection(current_stage=current, required_document=None)
+
+    patch_transaction(monkeypatch, stages, connection)
+    patch_audit_actor(monkeypatch, stages)
+
+    with pytest.raises(HTTPException) as exc:
+        run_async(
+            stages.complete_stage(
+                current["id"],
+                pool=object(),
+                settings=Settings(frontend_url="http://localhost:3000"),
+                user=make_user(Department.RD),
+            )
+        )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "Upload the completed costing BOQ from the Documents tab before marking this R&D stage complete."
+    assert connection.execute_calls == []
 
 
 def test_complete_stage_sends_handoff_email_to_next_team(monkeypatch) -> None:
@@ -1508,6 +1615,90 @@ def test_upload_project_document_persists_metadata_and_returns_signed_url(monkey
     assert result.uploaded_by == user.user_id
     assert result.uploaded_by_name == "Sales Lead"
     assert result.download_url == "https://example.com/signed/document"
+
+
+def test_upload_costing_boq_notifies_assignee_sales_and_admin(monkeypatch) -> None:
+    project_id = uuid4()
+    pool = ProjectDocumentPool(
+        project_id=project_id,
+        recipient_rows=[
+            {"email": "admin@example.com"},
+            {"email": "nirvaan@example.com"},
+            {"email": "sales@example.com"},
+        ],
+        uploaded_by_name="R&D Lead",
+    )
+    user = make_user(Department.RD)
+    patch_transaction(monkeypatch, projects, pool)
+    sent_notifications: list[dict] = []
+
+    async def fake_upload_storage_object(*_args, **_kwargs) -> None:
+        return None
+
+    async def fake_create_signed_download_url(*_args, **_kwargs) -> str:
+        return "https://example.com/signed/costing"
+
+    class FakeNotificationService:
+        def __init__(self, _settings) -> None:
+            pass
+
+        async def send_costing_boq_uploaded(self, **kwargs) -> None:
+            sent_notifications.append(kwargs)
+
+    monkeypatch.setattr(projects, "upload_storage_object", fake_upload_storage_object)
+    monkeypatch.setattr(projects, "create_signed_download_url", fake_create_signed_download_url)
+    monkeypatch.setattr(projects, "NotificationService", FakeNotificationService)
+
+    upload = UploadFile(filename="costing-sheet.xlsx", file=BytesIO(b"costing-file"))
+
+    result = run_async(
+        projects.upload_project_document(
+            project_id,
+            document_type=ProjectDocumentType.COSTING_BOQ,
+            file=upload,
+            pool=pool,
+            settings=Settings(
+                frontend_url="http://localhost:3000",
+                supabase_url="https://example.supabase.co",
+                supabase_service_key="service-key",
+            ),
+            user=user,
+        )
+    )
+
+    assert result.document_type == ProjectDocumentType.COSTING_BOQ
+    assert result.file_name == "costing-sheet.xlsx"
+    assert result.uploaded_by_name == "R&D Lead"
+    assert sent_notifications == [
+        {
+            "project_code": "P0400",
+            "project_name": "Document Upload Test",
+            "stage_name": "Costing Shared by R&D",
+            "file_name": "costing-sheet.xlsx",
+            "uploaded_by_name": "R&D Lead",
+            "recipients": ["admin@example.com", "nirvaan@example.com", "sales@example.com"],
+            "project_url": f"http://localhost:3000/projects/{project_id}",
+        }
+    ]
+
+
+def test_upload_costing_boq_rejects_non_rd_users(monkeypatch) -> None:
+    pool = ProjectDocumentPool(project_id=uuid4())
+
+    with pytest.raises(HTTPException) as exc:
+        run_async(
+            projects.upload_project_document(
+                pool.project_id,
+                document_type=ProjectDocumentType.COSTING_BOQ,
+                file=UploadFile(filename="costing-sheet.xlsx", file=BytesIO(b"costing-file")),
+                pool=pool,
+                settings=Settings(),
+                user=make_user(Department.SALES),
+            )
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Only R&D can upload the completed costing BOQ."
 
 
 def test_build_project_documents_converts_file_size_without_duplicate_kwargs() -> None:

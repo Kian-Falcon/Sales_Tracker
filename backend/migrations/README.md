@@ -34,6 +34,7 @@ Run these files in Supabase SQL Editor, top to bottom:
 15. `015_stage_due_date_change_requests.sql`
 16. `016_stage_deadline_reminder_log.sql`
 17. `017_allow_project_cleanup_comment_delete.sql`
+18. `018_costing_boq_document_type.sql`
 
 ## What The Migrations Create
 
@@ -51,6 +52,7 @@ Run these files in Supabase SQL Editor, top to bottom:
 - due-date change request storage so non-Sales teams can request date changes for Sales/Admin approval
 - deadline reminder logs so the scheduler can send 7/3/1-day reminder emails without duplicates
 - a safer comment lock trigger that still blocks normal edits/deletes but allows backend-managed project cleanup
+- a dedicated `costing_boq` document type so R&D can upload the finalized costing file and Sales/Admin can track that handoff
 - RLS policies for authenticated reads and service-role writes
 
 ## After Running Migrations

@@ -16,6 +16,7 @@ from database import get_pool, record_to_dict, records_to_dicts, set_audit_actor
 from models.comment import CommentRead
 from models.common import CurrentUser, Department, ProjectDocumentType, StageSnapshot
 from models.project import ProjectCreate, ProjectDetail, ProjectDocumentRead, ProjectSummary, ProjectUpdate
+from models.profile import MentionableProfileRead
 from models.stage import StageDueDateChangeRequestRead, StageRead
 from services.storage import (
     StorageServiceError,
@@ -39,6 +40,17 @@ async def _send_project_created_summary_task(settings: Settings, payload: dict) 
     except Exception as exc:
         logger.warning(
             "Project %s was created but summary email could not be sent: %s",
+            payload.get("project_code", "project"),
+            exc,
+        )
+
+
+async def _send_costing_boq_uploaded_task(settings: Settings, payload: dict) -> None:
+    try:
+        await NotificationService(settings).send_costing_boq_uploaded(**payload)
+    except Exception as exc:
+        logger.warning(
+            "Costing BOQ upload email could not be sent for %s: %s",
             payload.get("project_code", "project"),
             exc,
         )
@@ -143,6 +155,96 @@ def _normalize_project_row(row: dict | None) -> dict | None:
         normalized["total_order_value"] = float(normalized["total_order_value"])
 
     return normalized
+
+
+async def _load_project_assignee_profile(connection, assigned_person_email: str | None) -> dict | None:
+    if not assigned_person_email:
+        return None
+
+    row = await connection.fetchrow(
+        """
+        SELECT
+            id,
+            email,
+            COALESCE(NULLIF(full_name, ''), email) AS display_name,
+            department
+        FROM profiles
+        WHERE LOWER(email) = $1
+        """,
+        assigned_person_email.strip().lower(),
+    )
+    return record_to_dict(row) if row is not None else None
+
+
+async def _list_project_created_recipient_emails(
+    connection,
+    *,
+    assigned_person_email: str | None,
+) -> list[str]:
+    rows = await connection.fetch(
+        """
+        SELECT DISTINCT email
+        FROM profiles
+        WHERE email IS NOT NULL
+          AND NULLIF(email, '') IS NOT NULL
+          AND (
+                department = ANY($1::text[])
+                OR ($2::text IS NOT NULL AND LOWER(email) = $2::text)
+          )
+        ORDER BY email
+        """,
+        [Department.SALES.value, Department.ADMIN.value],
+        assigned_person_email.strip().lower() if assigned_person_email else None,
+    )
+    return [row["email"] for row in rows if row["email"]]
+
+
+async def _list_costing_boq_recipient_emails(
+    connection,
+    *,
+    assigned_person_name: str | None,
+) -> list[str]:
+    normalized_assignee = assigned_person_name.strip().lower() if assigned_person_name else None
+    rows = await connection.fetch(
+        """
+        SELECT DISTINCT email
+        FROM profiles
+        WHERE email IS NOT NULL
+          AND NULLIF(email, '') IS NOT NULL
+          AND (
+                department = ANY($1::text[])
+                OR (
+                    $2::text IS NOT NULL
+                    AND (
+                        LOWER(COALESCE(NULLIF(full_name, ''), email)) = $2::text
+                        OR LOWER(email) = $2::text
+                    )
+                )
+          )
+        ORDER BY email
+        """,
+        [Department.SALES.value, Department.ADMIN.value],
+        normalized_assignee,
+    )
+    return [row["email"] for row in rows if row["email"]]
+
+
+async def _fetch_project_mentionable_users(connection) -> list[MentionableProfileRead]:
+    rows = await connection.fetch(
+        """
+        SELECT
+            id,
+            COALESCE(NULLIF(full_name, ''), email) AS display_name,
+            email,
+            department
+        FROM profiles
+        WHERE email IS NOT NULL
+          AND NULLIF(email, '') IS NOT NULL
+          AND department IS NOT NULL
+        ORDER BY display_name, email
+        """
+    )
+    return [MentionableProfileRead(**record_to_dict(row)) for row in rows]
 
 
 async def _build_project_documents(
@@ -396,6 +498,16 @@ async def create_project(
     try:
         async with transaction(pool) as connection:
             stage_blueprint = await load_stage_blueprint(connection)
+            assigned_person_profile = await _load_project_assignee_profile(
+                connection,
+                payload.assigned_person_email,
+            )
+            if payload.assigned_person_email and assigned_person_profile is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Selected assigned person could not be found. Please choose a teammate from the mention list.",
+                )
+
             await set_audit_actor(connection, user.user_id)
             creator_profile = await connection.fetchrow(
                 """
@@ -425,7 +537,9 @@ async def create_project(
                 payload.name,
                 payload.client,
                 payload.brand.strip() if payload.brand else None,
-                payload.assigned_person_name.strip(),
+                assigned_person_profile["display_name"]
+                if assigned_person_profile is not None
+                else payload.assigned_person_name.strip(),
                 payload.priority.value,
                 payload.estimated_tat_days,
                 payload.total_order_value,
@@ -475,16 +589,9 @@ async def create_project(
             stage_rows = records_to_dicts(
                 await connection.fetch("SELECT * FROM stages WHERE project_id = $1 ORDER BY sort_order", project["id"])
             )
-            recipient_rows = records_to_dicts(
-                await connection.fetch(
-                    """
-                    SELECT DISTINCT email
-                    FROM profiles
-                    WHERE email IS NOT NULL
-                      AND NULLIF(email, '') IS NOT NULL
-                    ORDER BY email
-                    """
-                )
+            recipients = await _list_project_created_recipient_emails(
+                connection,
+                assigned_person_email=assigned_person_profile["email"] if assigned_person_profile is not None else None,
             )
     except UniqueViolationError as exc:
         raise HTTPException(
@@ -505,7 +612,6 @@ async def create_project(
     project_dict["created_by_name"] = creator_name
     project_dict["created_by_department"] = creator_department
 
-    recipients = [row["email"] for row in recipient_rows if row.get("email")]
     first_stage_name = stage_rows[0]["name"] if stage_rows else "Workflow started"
     project_url = f"{settings.frontend_url.rstrip('/')}/projects/{project['id']}" if settings.frontend_url else None
 
@@ -536,6 +642,15 @@ async def create_project(
         await sync_project_tree(pool, settings, project["id"])
 
     return _build_project_detail(project_dict, stage_rows, [], [], [])
+
+
+@router.get("/meta/mentionable-users", response_model=list[MentionableProfileRead])
+async def list_project_mentionable_users(
+    pool=Depends(get_pool),
+    user: CurrentUser = Depends(require_departments(Department.SALES, Department.ADMIN)),
+) -> list[MentionableProfileRead]:
+    async with transaction(pool) as connection:
+        return await _fetch_project_mentionable_users(connection)
 
 
 @router.patch("/{project_id}", response_model=ProjectDetail)
@@ -659,8 +774,22 @@ async def upload_project_document(
     background_tasks: BackgroundTasks = None,
     pool=Depends(get_pool),
     settings: Settings = Depends(get_settings),
-    user: CurrentUser = Depends(require_departments(Department.SALES, Department.ADMIN)),
+    user: CurrentUser = Depends(get_current_user),
 ) -> ProjectDocumentRead:
+    costing_boq_notification_payload: dict | None = None
+
+    if document_type == ProjectDocumentType.COSTING_BOQ:
+        if user.department != Department.RD:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only R&D can upload the completed costing BOQ.",
+            )
+    elif user.department not in {Department.SALES, Department.ADMIN}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Sales or Admin can upload BOQ files and general project attachments.",
+        )
+
     file_name = (file.filename or "").strip()
     if not file_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Please select a file to upload.")
@@ -682,7 +811,25 @@ async def upload_project_document(
         )
 
     project = await pool.fetchrow(
-        "SELECT id FROM projects WHERE id = $1 AND is_archived = FALSE",
+        """
+        SELECT
+            p.id,
+            p.project_code,
+            p.name,
+            p.assigned_person_name,
+            s.name AS active_stage_name
+        FROM projects p
+        LEFT JOIN LATERAL (
+            SELECT name
+            FROM stages
+            WHERE project_id = p.id
+              AND status IN ('active', 'overdue')
+            ORDER BY sort_order
+            LIMIT 1
+        ) s ON TRUE
+        WHERE p.id = $1
+          AND p.is_archived = FALSE
+        """,
         project_id,
     )
     if project is None:
@@ -739,6 +886,22 @@ async def upload_project_document(
                 len(content),
                 user.user_id,
             )
+            if document_type == ProjectDocumentType.COSTING_BOQ:
+                recipients = await _list_costing_boq_recipient_emails(
+                    connection,
+                    assigned_person_name=project["assigned_person_name"],
+                )
+                if recipients:
+                    inserted_row = record_to_dict(inserted) or {}
+                    costing_boq_notification_payload = {
+                        "project_code": project["project_code"],
+                        "project_name": project["name"],
+                        "stage_name": project["active_stage_name"] or "Costing Shared by R&D",
+                        "file_name": inserted_row.get("file_name") or file_name,
+                        "uploaded_by_name": inserted_row.get("uploaded_by_name") or user.email or Department.RD.value,
+                        "recipients": recipients,
+                        "project_url": f"{settings.frontend_url.rstrip('/')}/projects/{project_id}" if settings.frontend_url else None,
+                    }
     except Exception:
         try:
             await delete_storage_object(settings, bucket=storage_bucket, path=storage_path)
@@ -758,6 +921,13 @@ async def upload_project_document(
 
     inserted_row = record_to_dict(inserted) or {}
     inserted_row["file_size"] = int(inserted_row["file_size"])
+
+    if costing_boq_notification_payload:
+        if background_tasks is not None:
+            background_tasks.add_task(_send_costing_boq_uploaded_task, settings, costing_boq_notification_payload)
+        else:
+            await _send_costing_boq_uploaded_task(settings, costing_boq_notification_payload)
+
     if background_tasks is not None:
         background_tasks.add_task(sync_project_tree, pool, settings, project_id)
     else:

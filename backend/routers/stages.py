@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from auth import get_current_user
 from config import Settings, get_settings
 from database import get_pool, set_audit_actor, transaction
-from models.common import CurrentUser, Department
+from models.common import CurrentUser, Department, ProjectDocumentType
 from models.project import ProjectDetail
 from models.stage import (
     StageDueDateChangeRequestCreate,
@@ -21,6 +21,11 @@ from services.workflow_settings import get_due_days_by_stage_key
 
 router = APIRouter(prefix="/api/v1/stages", tags=["stages"])
 logger = logging.getLogger(__name__)
+
+COSTING_BOQ_REQUIRED_STAGE_KEYS = {
+    "costing_shared_rd",
+    "costing_revision_items",
+}
 
 
 async def _send_stage_handoff_notification_task(settings: Settings, payload: dict) -> None:
@@ -87,6 +92,24 @@ async def _resolve_display_name(connection, user: CurrentUser) -> str:
     return user.email or user.department.value
 
 
+async def _has_required_costing_boq(connection, *, project_id: UUID, activated_at) -> bool:
+    row = await connection.fetchrow(
+        """
+        SELECT id
+        FROM project_documents
+        WHERE project_id = $1
+          AND document_type = $2
+          AND ($3::timestamptz IS NULL OR created_at >= $3)
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        project_id,
+        ProjectDocumentType.COSTING_BOQ.value,
+        activated_at,
+    )
+    return row is not None
+
+
 async def _list_profile_emails(
     connection,
     *,
@@ -139,6 +162,18 @@ async def complete_stage(
 
         if stage["status"] not in {"active", "overdue"}:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only active or overdue stages can be completed.")
+
+        if stage["stage_key"] in COSTING_BOQ_REQUIRED_STAGE_KEYS:
+            has_required_costing_boq = await _has_required_costing_boq(
+                connection,
+                project_id=stage["project_id"],
+                activated_at=stage["activated_at"],
+            )
+            if not has_required_costing_boq:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Upload the completed costing BOQ from the Documents tab before marking this R&D stage complete.",
+                )
 
         completed_on = date.today()
         timing_label = _completion_timing_label(

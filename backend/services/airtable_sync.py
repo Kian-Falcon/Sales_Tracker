@@ -60,7 +60,10 @@ def _build_project_record_fields(
     completed_stages = sum(1 for stage in project.stages if stage.status == StageStatus.DONE)
     overdue_stages = sum(1 for stage in project.stages if stage.status == StageStatus.OVERDUE)
     pending_stages = sum(1 for stage in project.stages if stage.status == StageStatus.PENDING)
-    has_boq = any(document.document_type == ProjectDocumentType.BOQ for document in project.documents)
+    has_boq = any(
+        document.document_type in {ProjectDocumentType.BOQ, ProjectDocumentType.COSTING_BOQ}
+        for document in project.documents
+    )
 
     return {
         PROJECT_ID_FIELD: str(project.id),

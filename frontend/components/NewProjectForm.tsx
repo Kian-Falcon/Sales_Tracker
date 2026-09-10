@@ -1,10 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useState, useTransition, type ChangeEvent, type FormEvent } from "react";
 
-import { createProject, uploadProjectDocument } from "@/lib/api";
-import type { ProjectPriority, ViewerDetails } from "@/lib/types";
+import { createProject, listProjectMentionableUsers, uploadProjectDocument } from "@/lib/api";
+import type { MentionableUser, ProjectPriority, ViewerDetails } from "@/lib/types";
 
 type FormState = {
   name: string;
@@ -22,6 +22,9 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [mentionableUsers, setMentionableUsers] = useState<MentionableUser[]>([]);
+  const [mentionLoading, setMentionLoading] = useState(false);
+  const [mentionError, setMentionError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({
     name: "",
     client: "",
@@ -32,6 +35,16 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
     special_request: ""
   });
   const [boqFile, setBoqFile] = useState<File | null>(null);
+  const [selectedAssignee, setSelectedAssignee] = useState<MentionableUser | null>(
+    viewer?.department
+      ? {
+          id: viewer.id,
+          display_name: viewer.fullName,
+          email: viewer.email,
+          department: viewer.department
+        }
+      : null
+  );
 
   const updateField = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setForm((current) => ({
@@ -40,8 +53,82 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
     }));
   };
 
+  useEffect(() => {
+    let active = true;
+
+    setMentionLoading(true);
+
+    void listProjectMentionableUsers()
+      .then((users) => {
+        if (!active) {
+          return;
+        }
+        setMentionableUsers(users);
+        setMentionError(null);
+      })
+      .catch((caughtError) => {
+        if (!active) {
+          return;
+        }
+        setMentionableUsers([]);
+        setMentionError(
+          caughtError instanceof Error ? caughtError.message : "Unable to load teammates for assignment."
+        );
+      })
+      .finally(() => {
+        if (active) {
+          setMentionLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const assigneeMentionQuery = useMemo(() => {
+    const value = form.assigned_person_name.trimStart();
+    if (!value.startsWith("@")) {
+      return null;
+    }
+
+    return value.slice(1).trim().toLowerCase();
+  }, [form.assigned_person_name]);
+
+  const filteredMentionableUsers = useMemo(() => {
+    if (assigneeMentionQuery === null) {
+      return [];
+    }
+
+    return mentionableUsers
+      .filter((user) => {
+        if (!assigneeMentionQuery) {
+          return true;
+        }
+
+        return (
+          user.display_name.toLowerCase().includes(assigneeMentionQuery) ||
+          user.email.toLowerCase().includes(assigneeMentionQuery) ||
+          user.department.toLowerCase().includes(assigneeMentionQuery)
+        );
+      })
+      .slice(0, 6);
+  }, [assigneeMentionQuery, mentionableUsers]);
+
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     setBoqFile(event.target.files?.[0] ?? null);
+  };
+
+  const handleAssignedPersonChange = (value: string) => {
+    updateField("assigned_person_name", value);
+    if (selectedAssignee && value.trim() !== selectedAssignee.display_name) {
+      setSelectedAssignee(null);
+    }
+  };
+
+  const handleAssigneeSelect = (user: MentionableUser) => {
+    updateField("assigned_person_name", user.display_name);
+    setSelectedAssignee(user);
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -55,6 +142,7 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
             name: form.name.trim(),
             client: form.client.trim(),
             assigned_person_name: form.assigned_person_name.trim(),
+            assigned_person_email: selectedAssignee?.email,
             priority: form.priority,
             estimated_tat_days: Number(form.estimated_tat_days),
             total_order_value: Number(form.total_order_value),
@@ -106,12 +194,63 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
           onChange={(value) => updateField("client", value)}
           placeholder="Acme Retail"
         />
-        <Field
-          label="Assigned person"
-          value={form.assigned_person_name}
-          onChange={(value) => updateField("assigned_person_name", value)}
-          placeholder="Project owner or account manager"
-        />
+        <label className="block space-y-2">
+          <span className="text-sm font-medium text-ink/70">Assigned person</span>
+          <input
+            required
+            type="text"
+            value={form.assigned_person_name}
+            onChange={(event) => handleAssignedPersonChange(event.target.value)}
+            placeholder="Type @ to pick a teammate or enter a name"
+            className="w-full rounded-2xl border border-ink/10 bg-surface-muted/50 px-4 py-3 text-sm outline-none transition focus:border-accent"
+          />
+          {assigneeMentionQuery !== null && filteredMentionableUsers.length ? (
+            <div className="rounded-2xl border border-ink/10 bg-white p-2 shadow-sm">
+              <p className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">
+                Assign teammate
+              </p>
+              <div className="space-y-1">
+                {filteredMentionableUsers.map((user) => (
+                  <button
+                    key={user.id}
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      handleAssigneeSelect(user);
+                    }}
+                    className="flex w-full items-center justify-between rounded-2xl px-3 py-2 text-left transition hover:bg-surface-muted/70"
+                  >
+                    <div>
+                      <div className="text-sm font-medium text-ink">{user.display_name}</div>
+                      <div className="text-xs text-ink/55">{user.email}</div>
+                    </div>
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/45">
+                      {user.department}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {selectedAssignee ? (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-ink/55">
+              <span className="rounded-full border border-success/20 bg-success/10 px-3 py-1 font-semibold text-success">
+                Notifying {selectedAssignee.email}
+              </span>
+              <span>{selectedAssignee.department}</span>
+            </div>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-3 text-xs text-ink/50">
+            <span>
+              Type `@` to pick a teammate. New-project emails go to the selected assignee plus Sales and Admin.
+            </span>
+            {mentionLoading ? <span className="text-ink/45">Loading teammates...</span> : null}
+            {mentionError ? <span className="text-danger">{mentionError}</span> : null}
+            {!selectedAssignee && assigneeMentionQuery === null ? (
+              <span className="text-warning">No teammate selected yet. Only Sales/Admin will receive the email.</span>
+            ) : null}
+          </div>
+        </label>
 
         <label className="block space-y-2">
           <span className="text-sm font-medium text-ink/70">Priority</span>

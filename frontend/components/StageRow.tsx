@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import { CommentThread } from "@/components/CommentThread";
 import { StatusChip } from "@/components/StatusChip";
@@ -11,14 +11,19 @@ import {
   useReviewStageDueDateRequestMutation,
   useSetDueDateMutation
 } from "@/hooks/useStage";
+import { uploadProjectDocument } from "@/lib/api";
 import type {
   Department,
   DueDateRequestStatus,
+  ProjectDocument,
   ProjectDetail,
   Stage,
   StageDueDateRequest
 } from "@/lib/types";
 import { formatDate, formatDateTime, formatPendingDuration, titleCasePhase } from "@/lib/utils";
+
+const acceptedDocumentTypes = ".pdf,.csv,.xls,.xlsx,.doc,.docx,.txt,.zip,.png,.jpg,.jpeg";
+const costingBoqRequiredStageKeys = new Set(["costing_shared_rd", "costing_revision_items"]);
 
 function shouldResetOverdueStatus(currentStatus: Stage["status"], dueDate: string | null) {
   if (currentStatus !== "overdue" || !dueDate) {
@@ -61,6 +66,26 @@ function buildReviewedRequest({
   };
 }
 
+function stageRequiresCostingBoqUpload(stageKey: string) {
+  return costingBoqRequiredStageKeys.has(stageKey);
+}
+
+function findLatestCostingBoqForStage(documents: ProjectDocument[], activatedAt: string | null) {
+  const activatedAtTimestamp = activatedAt ? new Date(activatedAt).getTime() : null;
+
+  return documents.find((document) => {
+    if (document.document_type !== "costing_boq") {
+      return false;
+    }
+
+    if (activatedAtTimestamp === null) {
+      return true;
+    }
+
+    return new Date(document.created_at).getTime() >= activatedAtTimestamp;
+  }) ?? null;
+}
+
 export function StageRow({
   project,
   stage,
@@ -82,6 +107,7 @@ export function StageRow({
   const reviewDueDateRequest = useReviewStageDueDateRequestMutation();
   const { pushToast } = useToast();
   const [localStage, setLocalStage] = useState(stage);
+  const [projectDocuments, setProjectDocuments] = useState(project.documents);
   const [dueDate, setDueDate_] = useState(stage.due_date ?? "");
   const [requestedDueDate, setRequestedDueDate] = useState(stage.due_date ?? "");
   const [requestReason, setRequestReason] = useState("");
@@ -90,12 +116,19 @@ export function StageRow({
   const [dueDateError, setDueDateError] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  const [costingBoqError, setCostingBoqError] = useState<string | null>(null);
   const [activityNotice, setActivityNotice] = useState<string | null>(null);
   const [reviewingRequestId, setReviewingRequestId] = useState<string | null>(null);
+  const [costingBoqFile, setCostingBoqFile] = useState<File | null>(null);
+  const [uploadingCostingBoq, setUploadingCostingBoq] = useState(false);
   const [expanded, setExpanded] = useState(!shouldAutoCollapseStage(stage.status));
   const previousStageStatusRef = useRef(stage.status);
   const canComplete = viewerDepartment === localStage.responsible_dept || viewerDepartment === "Admin";
-  const canMarkStageComplete = canComplete && ["active", "overdue"].includes(localStage.status);
+  const requiresCostingBoqUpload = stageRequiresCostingBoqUpload(localStage.stage_key);
+  const latestCostingBoq = findLatestCostingBoqForStage(projectDocuments, localStage.activated_at);
+  const hasRequiredCostingBoq = !requiresCostingBoqUpload || Boolean(latestCostingBoq);
+  const canSeeCompleteButton = canComplete && ["active", "overdue"].includes(localStage.status);
+  const canMarkStageComplete = canSeeCompleteButton && hasRequiredCostingBoq;
   const canDirectSchedule = viewerDepartment === "Sales" || viewerDepartment === "Admin";
   const canRequestDueDateChange =
     Boolean(viewerDepartment) &&
@@ -110,6 +143,8 @@ export function StageRow({
   const isCompletedStage = localStage.status === "done";
   const isCollapsibleStage = shouldAutoCollapseStage(localStage.status);
   const isCollapsedStage = isCollapsibleStage && !expanded;
+  const canUploadCostingBoq =
+    viewerDepartment === "R&D" && requiresCostingBoqUpload && ["active", "overdue"].includes(localStage.status);
   const pendingDurationLabel = formatPendingDuration(
     localStage.activated_at,
     isCompletedStage ? localStage.completed_at : undefined
@@ -122,6 +157,8 @@ export function StageRow({
     setLocalStage(stage);
     setDueDate_(stage.due_date ?? "");
     setRequestedDueDate(stage.due_date ?? "");
+    setCompletionError(null);
+    setCostingBoqError(null);
     if (!shouldAutoCollapseStage(stage.status)) {
       setExpanded(true);
     } else if (!shouldAutoCollapseStage(previousStatus)) {
@@ -129,6 +166,10 @@ export function StageRow({
     }
     previousStageStatusRef.current = stage.status;
   }, [stage]);
+
+  useEffect(() => {
+    setProjectDocuments(project.documents);
+  }, [project.documents]);
 
   const syncStageFromProject = (updatedProject: ProjectDetail) => {
     const updatedStage = updatedProject.stages.find((entry) => entry.id === stage.id);
@@ -145,6 +186,40 @@ export function StageRow({
       previousStageStatusRef.current = updatedStage.status;
     }
     onProjectChange?.(updatedProject);
+  };
+
+  const handleUploadCostingBoq = async () => {
+    if (!costingBoqFile) {
+      return;
+    }
+
+    setCompletionError(null);
+    setCostingBoqError(null);
+    setActivityNotice("Uploading completed costing BOQ...");
+    onProjectSyncStateChange?.(project.id, "Uploading completed costing BOQ...");
+    setUploadingCostingBoq(true);
+
+    try {
+      const uploadedDocument = await uploadProjectDocument(project.id, costingBoqFile, "costing_boq");
+      const nextDocuments = [uploadedDocument, ...projectDocuments.filter((document) => document.id !== uploadedDocument.id)];
+      setProjectDocuments(nextDocuments);
+      setCostingBoqFile(null);
+      onProjectChange?.({
+        ...project,
+        documents: nextDocuments
+      });
+      pushToast({
+        tone: "success",
+        title: "Costing BOQ uploaded",
+        description: "The costing file is attached and the assignee, Sales, and Admin were notified."
+      });
+    } catch (error) {
+      setCostingBoqError(error instanceof Error ? error.message : "Unable to upload the costing BOQ right now.");
+    } finally {
+      setUploadingCostingBoq(false);
+      setActivityNotice(null);
+      onProjectSyncStateChange?.(project.id, null);
+    }
   };
 
   const handleSetDueDate = async () => {
@@ -185,7 +260,13 @@ export function StageRow({
   };
 
   const handleCompleteStage = async () => {
-    if (!canMarkStageComplete || isCompletedStage) {
+    if (requiresCostingBoqUpload && !hasRequiredCostingBoq) {
+      setExpanded(true);
+      setCompletionError("Upload the completed costing BOQ before marking this R&D stage complete.");
+      return;
+    }
+
+    if (!canSeeCompleteButton || isCompletedStage) {
       return;
     }
 
@@ -427,7 +508,12 @@ export function StageRow({
               Only Sales or Admin can set due dates directly. Your team can request a change below.
             </p>
           ) : null}
-          {!isCompletedStage && canMarkStageComplete ? (
+          {requiresCostingBoqUpload && !hasRequiredCostingBoq ? (
+            <p className="max-w-[16rem] text-right text-xs text-danger">
+              Upload the completed costing BOQ before this stage can be closed.
+            </p>
+          ) : null}
+          {!isCompletedStage && canSeeCompleteButton ? (
             <button
               type="button"
               disabled={completeStage.isPending || !canMarkStageComplete}
@@ -460,6 +546,69 @@ export function StageRow({
             <StageMeta label="Completed" value={formatDateTime(localStage.completed_at)} />
             <StageMeta label={isCompletedStage ? "Turnaround" : "Pending"} value={pendingDurationLabel || "-"} />
           </div>
+
+          {requiresCostingBoqUpload ? (
+            <div className="space-y-4 rounded-3xl border border-border bg-surface-muted/55 p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h4 className="text-sm font-semibold text-ink">Completed costing BOQ</h4>
+                  <p className="text-xs text-ink/50">
+                    R&D must attach the finalized costing BOQ before this stage can be marked complete.
+                  </p>
+                </div>
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${
+                    hasRequiredCostingBoq ? "bg-success/15 text-success" : "bg-danger/10 text-danger"
+                  }`}
+                >
+                  {hasRequiredCostingBoq ? "Uploaded" : "Pending"}
+                </span>
+              </div>
+
+              {latestCostingBoq ? (
+                <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-ink/75">
+                  <div className="font-semibold text-ink">{latestCostingBoq.file_name}</div>
+                  <div className="mt-1 text-xs text-ink/50">
+                    Uploaded {formatDateTime(latestCostingBoq.created_at)}
+                    {latestCostingBoq.uploaded_by_name ? ` by ${latestCostingBoq.uploaded_by_name}` : ""}
+                  </div>
+                </div>
+              ) : null}
+
+              {canUploadCostingBoq ? (
+                <div className="space-y-3 rounded-2xl border border-border bg-white p-4">
+                  <input
+                      type="file"
+                      accept={acceptedDocumentTypes}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                        setCostingBoqError(null);
+                        setCostingBoqFile(event.target.files?.[0] ?? null);
+                      }}
+                      className="block w-full text-sm text-ink/70 file:mr-4 file:rounded-full file:border-0 file:bg-accent file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-accent/90"
+                    />
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      disabled={!costingBoqFile || uploadingCostingBoq}
+                      onClick={() => void handleUploadCostingBoq()}
+                      className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {uploadingCostingBoq ? "Uploading..." : "Upload completed costing BOQ"}
+                    </button>
+                    {costingBoqFile ? <span className="text-sm text-ink/70">{costingBoqFile.name}</span> : null}
+                  </div>
+                  <p className="text-xs text-ink/50">
+                    This upload unlocks stage completion and emails the assigned person, Sales, and Admin.
+                  </p>
+                  {costingBoqError ? (
+                    <p className="rounded-2xl border border-danger/15 bg-danger/5 px-4 py-3 text-sm text-danger">
+                      {costingBoqError}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           {canRequestDueDateChange || canReviewRequests || localStage.due_date_requests.length > 0 ? (
             <div className="space-y-4 rounded-3xl bg-surface-muted/70 p-4">

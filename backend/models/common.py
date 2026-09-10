@@ -22,6 +22,7 @@ class ProjectPriority(str, Enum):
 
 class ProjectDocumentType(str, Enum):
     BOQ = "boq"
+    COSTING_BOQ = "costing_boq"
     ATTACHMENT = "attachment"
 
 

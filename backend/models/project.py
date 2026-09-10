@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from models.common import Department, ProjectDocumentType, ProjectPriority, StagePhase, StageSnapshot, StageStatus
 from models.stage import StageRead
@@ -12,6 +12,7 @@ class ProjectCreate(BaseModel):
     client: str = Field(min_length=1, max_length=255)
     brand: str | None = Field(default=None, max_length=255)
     assigned_person_name: str = Field(min_length=1, max_length=255)
+    assigned_person_email: EmailStr | None = None
     priority: ProjectPriority = ProjectPriority.NORMAL
     estimated_tat_days: int = Field(ge=1, le=3650)
     total_order_value: float = Field(ge=0)
