@@ -1573,9 +1573,9 @@ function GridWorkspaceTable({
   }
 
   return (
-    <div className="overflow-hidden rounded-[24px] border border-border">
-      <div className="overflow-auto">
-        <table className="min-w-[980px] border-collapse tabular-nums">
+    <div className="overflow-hidden rounded-[24px] border border-border bg-white">
+      <div className="max-h-[65vh] overflow-auto overscroll-contain">
+        <table className="min-w-[980px] w-full border-collapse tabular-nums">
           <thead>
             <tr className="bg-surface-muted/70 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-ink/60">
               <th className="sticky left-0 top-0 z-30 min-w-[280px] border-b border-r border-border bg-surface-muted/95 px-4 py-3 backdrop-blur">
@@ -1588,7 +1588,7 @@ function GridWorkspaceTable({
               <th className="sticky top-0 z-20 border-b border-border bg-surface-muted/95 px-4 py-3 backdrop-blur">Assigned person</th>
               <th className="sticky top-0 z-20 border-b border-border bg-surface-muted/95 px-4 py-3 text-right backdrop-blur">Order value</th>
               <th className="sticky top-0 z-20 border-b border-border bg-surface-muted/95 px-4 py-3 backdrop-blur">Created</th>
-              <th className="sticky top-0 z-20 border-b border-border bg-surface-muted/95 px-4 py-3 text-right backdrop-blur">Actions</th>
+              <th className="sticky right-0 top-0 z-30 border-b border-l border-border bg-surface-muted/95 px-4 py-3 text-right backdrop-blur">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1727,7 +1727,14 @@ function GridWorkspaceTable({
                     />
                   </td>
                   <td className={cn("px-4 text-ink/65", rowDensityClasses[rowDensity])}>{formatDate(project.created_at)}</td>
-                  <td className={cn("px-4 text-right", rowDensityClasses[rowDensity])}>
+                  <td
+                    className={cn(
+                      "sticky right-0 z-10 border-l border-border px-4 text-right",
+                      rowDensityClasses[rowDensity],
+                      stickyBackground,
+                      "group-hover:bg-surface-muted/35"
+                    )}
+                  >
                     <div className="flex items-center justify-end gap-2 opacity-100 transition md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
                       <button
                         type="button"
