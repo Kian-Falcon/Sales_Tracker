@@ -1,3 +1,4 @@
+import { AuthSidePanel } from "@/components/AuthSidePanel";
 import { AppLogo } from "@/components/AppLogo";
 import { LoginForm } from "@/components/LoginForm";
 
@@ -5,20 +6,11 @@ export default function LoginPage() {
   return (
     <div className="grid min-h-[calc(100vh-4rem)] place-items-center">
       <div className="grid w-full max-w-xl overflow-hidden rounded-[28px] border border-ink/10 bg-white/90 shadow-panel lg:max-w-5xl lg:grid-cols-[1.1fr_0.9fr] lg:gap-8 lg:rounded-[36px]">
-        <section className="hidden space-y-6 bg-ink px-8 py-10 text-white md:px-12 lg:block">
-          <span className="inline-flex rounded-full border border-white/20 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white/70">
-            Kian Falcon Workflow
-          </span>
-          <div className="space-y-4">
-            <h1 className="max-w-md text-4xl font-semibold leading-tight">
-              Track every project handoff in one shared workspace.
-            </h1>
-            <p className="max-w-lg text-sm leading-7 text-white/70">
-              From costing and drawings to production, QC, and dispatch, every team works from the same live
-              workflow with clear ownership, due dates, files, and updates.
-            </p>
-          </div>
-        </section>
+        <AuthSidePanel
+          eyebrow="Kian Falcon Workflow"
+          title="Track every project handoff in one shared workspace."
+          description="From costing and drawings to production, QC, and dispatch, every team works from the same live workflow with clear ownership, due dates, files, and updates."
+        />
 
         <section className="space-y-6 px-6 py-8 sm:px-8 sm:py-10 md:px-10">
           <div className="space-y-4 text-center">
