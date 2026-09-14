@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { AppLogo } from "@/components/AppLogo";
 import { UserSidebar } from "@/components/UserSidebar";
 
 function getPageLabel(pathname: string) {
@@ -75,9 +76,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="min-w-0">
         <div className="sticky top-0 z-20 flex items-center justify-between border-b border-border bg-white/90 px-4 py-3 backdrop-blur lg:hidden">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Workspace</p>
-            <p className="text-sm font-semibold text-ink">{pageLabel}</p>
+          <div className="flex items-center gap-3">
+            <AppLogo size="sm" priority />
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Workspace</p>
+              <p className="text-sm font-semibold text-ink">{pageLabel}</p>
+            </div>
           </div>
 
           <button

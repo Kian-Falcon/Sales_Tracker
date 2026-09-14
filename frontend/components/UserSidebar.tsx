@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 
+import { AppLogo } from "@/components/AppLogo";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 import type { Department, ViewerDetails } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -357,36 +358,46 @@ export function UserSidebar({
         <div className="flex h-full flex-col overflow-hidden border-r border-border bg-surface text-ink shadow-panel lg:shadow-none">
           <div
             className={cn(
-              "flex items-start justify-between gap-3 border-b border-border",
-              compactDesktopSidebar ? "px-3 py-4 lg:justify-center" : "px-5 py-5"
+              "border-b border-border",
+              compactDesktopSidebar ? "px-3 py-4" : "px-5 py-5"
             )}
           >
-            <div className={cn("space-y-1", !showExpanded && "lg:hidden")}>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Kian Falcon</p>
-              <p className="text-lg font-semibold text-ink">Workflow Tracker</p>
-            </div>
+            <div
+              className={cn(
+                "flex gap-3",
+                compactDesktopSidebar ? "flex-col items-center" : "items-start justify-between"
+              )}
+            >
+              <AppLogo
+                size={compactDesktopSidebar ? "sm" : "md"}
+                showWordmark={showExpanded}
+                showSubtitle={showExpanded}
+                className={compactDesktopSidebar ? "justify-center" : ""}
+                priority
+              />
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onToggleCollapsed}
-                aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-                title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-                className={cn(
-                  "hidden items-center justify-center rounded-full border border-border text-xs font-semibold text-ink/70 transition hover:border-accent hover:bg-accent/5 hover:text-accent lg:inline-flex",
-                  collapsed ? "h-11 w-11" : "gap-2 px-4 py-2"
-                )}
-              >
-                {collapsed ? <ChevronRightIcon className="h-4 w-4" /> : <ChevronLeftIcon className="h-4 w-4" />}
-                {!collapsed ? <span>Collapse</span> : null}
-              </button>
-              <button
-                type="button"
-                onClick={onCloseMobile}
-                className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-ink/70 transition hover:border-accent hover:bg-accent/5 hover:text-accent lg:hidden"
-              >
-                Close
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onToggleCollapsed}
+                  aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                  title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                  className={cn(
+                    "hidden items-center justify-center rounded-full border border-border text-xs font-semibold text-ink/70 transition hover:border-accent hover:bg-accent/5 hover:text-accent lg:inline-flex",
+                    collapsed ? "h-11 w-11" : "gap-2 px-4 py-2"
+                  )}
+                >
+                  {collapsed ? <ChevronRightIcon className="h-4 w-4" /> : <ChevronLeftIcon className="h-4 w-4" />}
+                  {!collapsed ? <span>Collapse</span> : null}
+                </button>
+                <button
+                  type="button"
+                  onClick={onCloseMobile}
+                  className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-ink/70 transition hover:border-accent hover:bg-accent/5 hover:text-accent lg:hidden"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
 

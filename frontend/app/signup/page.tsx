@@ -1,3 +1,4 @@
+import { AppLogo } from "@/components/AppLogo";
 import { SignupForm } from "@/components/SignupForm";
 
 export default function SignupPage() {
@@ -20,12 +21,15 @@ export default function SignupPage() {
         </section>
 
         <section className="space-y-6 px-6 py-8 sm:px-8 sm:py-10 md:px-10">
-          <div className="space-y-2">
+          <div className="space-y-4 text-center">
+            <AppLogo showWordmark size="xl" align="center" className="items-center" priority />
             <p className="hidden text-sm font-semibold uppercase tracking-[0.18em] text-ink/45 lg:block">Sign up</p>
-            <h2 className="text-2xl font-semibold text-ink sm:text-3xl">Create your account</h2>
-            <p className="hidden text-sm text-ink/60 lg:block">
-              Use your team email so your updates, comments, and stage ownership are visible across departments.
-            </p>
+            <div className="space-y-2 text-center">
+              <h2 className="text-2xl font-semibold text-ink sm:text-3xl">Create your account</h2>
+              <p className="hidden text-sm text-ink/60 lg:block">
+                Use your team email so your updates, comments, and stage ownership are visible across departments.
+              </p>
+            </div>
           </div>
           <SignupForm />
         </section>
