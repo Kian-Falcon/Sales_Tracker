@@ -7,15 +7,15 @@ export default function SignupPage() {
       <div className="grid w-full max-w-xl overflow-hidden rounded-[28px] border border-ink/10 bg-white/90 shadow-panel lg:max-w-5xl lg:grid-cols-[1.1fr_0.9fr] lg:gap-8 lg:rounded-[36px]">
         <section className="hidden space-y-6 bg-ink px-8 py-10 text-white md:px-12 lg:block">
           <span className="inline-flex rounded-full border border-white/20 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white/70">
-            Team access
+            Team onboarding
           </span>
           <div className="space-y-4">
             <h1 className="max-w-md text-4xl font-semibold leading-tight">
-              Create your department account and join the live workflow tracker.
+              Create your account and join the live project workflow.
             </h1>
             <p className="max-w-lg text-sm leading-7 text-white/70">
-              Add your name, work email, and department so every stage update and comment is clearly tied to the
-              right person.
+              Use your work email to access the shared workspace, update your stage, upload files, and keep every
+              handoff visible across teams.
             </p>
           </div>
         </section>
