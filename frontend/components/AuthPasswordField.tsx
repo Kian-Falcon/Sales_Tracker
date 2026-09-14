@@ -44,8 +44,8 @@ export function AuthPasswordField({
   const [visible, setVisible] = useState(false);
 
   return (
-    <div className="space-y-2">
-      <label className="text-sm font-medium text-ink/70" htmlFor={id}>
+    <div className="space-y-1.5">
+      <label className="text-[13px] font-medium text-ink/70" htmlFor={id}>
         {label}
       </label>
 
@@ -57,7 +57,7 @@ export function AuthPasswordField({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           autoComplete={autoComplete}
-          className="w-full rounded-2xl border border-border bg-white px-4 py-3 pr-12 text-sm outline-none transition focus:border-accent"
+          className="w-full rounded-2xl border border-border bg-white px-4 py-2.5 pr-11 text-[13px] outline-none transition focus:border-accent"
           placeholder={placeholder}
         />
 
@@ -65,7 +65,7 @@ export function AuthPasswordField({
           type="button"
           onClick={() => setVisible((current) => !current)}
           aria-label={visible ? "Hide password" : "Show password"}
-          className="absolute inset-y-0 right-3 my-auto flex h-9 w-9 items-center justify-center rounded-full text-ink/45 transition hover:bg-surface-muted/70 hover:text-ink"
+          className="absolute inset-y-0 right-2 my-auto flex h-8 w-8 items-center justify-center rounded-full text-ink/45 transition hover:bg-surface-muted/70 hover:text-ink"
         >
           <EyeIcon open={visible} />
         </button>

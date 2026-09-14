@@ -74,82 +74,84 @@ export function SignupForm() {
   };
 
   return (
-    <form className="space-y-5" onSubmit={handleSubmit}>
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-ink/70" htmlFor="fullName">
-          Full name
-        </label>
-        <input
-          id="fullName"
-          type="text"
-          required
-          value={fullName}
-          onChange={(event) => setFullName(event.target.value)}
-          autoComplete="name"
-          className="w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm outline-none transition focus:border-accent"
-          placeholder="Nirvaan Sawhney"
+    <form className="space-y-4" onSubmit={handleSubmit}>
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="space-y-1.5 md:col-span-2">
+          <label className="text-[13px] font-medium text-ink/70" htmlFor="fullName">
+            Full name
+          </label>
+          <input
+            id="fullName"
+            type="text"
+            required
+            value={fullName}
+            onChange={(event) => setFullName(event.target.value)}
+            autoComplete="name"
+            className="w-full rounded-2xl border border-ink/10 bg-white px-4 py-2.5 text-[13px] outline-none transition focus:border-accent"
+            placeholder="Nirvaan Sawhney"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-[13px] font-medium text-ink/70" htmlFor="signupEmail">
+            Work email
+          </label>
+          <input
+            id="signupEmail"
+            type="email"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            autoComplete="email"
+            className="w-full rounded-2xl border border-ink/10 bg-white px-4 py-2.5 text-[13px] outline-none transition focus:border-accent"
+            placeholder="team@kianfalcon.com"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-[13px] font-medium text-ink/70" htmlFor="department">
+            Department
+          </label>
+          <select
+            id="department"
+            value={department}
+            onChange={(event) => setDepartment(event.target.value as Department)}
+            className="w-full rounded-2xl border border-ink/10 bg-white px-4 py-2.5 text-[13px] outline-none transition focus:border-accent"
+          >
+            {departments.map((entry) => (
+              <option key={entry} value={entry}>
+                {entry}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <AuthPasswordField
+          id="signupPassword"
+          label="Password"
+          value={password}
+          onChange={setPassword}
+          placeholder="Create a password"
+          autoComplete="new-password"
+        />
+
+        <AuthPasswordField
+          id="confirmPassword"
+          label="Confirm password"
+          value={confirmPassword}
+          onChange={setConfirmPassword}
+          placeholder="Re-enter your password"
+          autoComplete="new-password"
         />
       </div>
 
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-ink/70" htmlFor="signupEmail">
-          Work email
-        </label>
-        <input
-          id="signupEmail"
-          type="email"
-          required
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          autoComplete="email"
-          className="w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm outline-none transition focus:border-accent"
-          placeholder="team@kianfalcon.com"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-ink/70" htmlFor="department">
-          Department
-        </label>
-        <select
-          id="department"
-          value={department}
-          onChange={(event) => setDepartment(event.target.value as Department)}
-          className="w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm outline-none transition focus:border-accent"
-        >
-          {departments.map((entry) => (
-            <option key={entry} value={entry}>
-              {entry}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <AuthPasswordField
-        id="signupPassword"
-        label="Password"
-        value={password}
-        onChange={setPassword}
-        placeholder="Create a password"
-        autoComplete="new-password"
-      />
-
-      <AuthPasswordField
-        id="confirmPassword"
-        label="Confirm password"
-        value={confirmPassword}
-        onChange={setConfirmPassword}
-        placeholder="Re-enter your password"
-        autoComplete="new-password"
-      />
-
-      {message ? <p className="rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-ink">{message}</p> : null}
-      {error ? <p className="rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-ink">{error}</p> : null}
+      {message ? <p className="rounded-2xl border border-border bg-surface-muted px-4 py-2.5 text-sm text-ink">{message}</p> : null}
+      {error ? <p className="rounded-2xl border border-border bg-surface-muted px-4 py-2.5 text-sm text-ink">{error}</p> : null}
 
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-full bg-accent px-5 py-3 text-sm font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-70"
+        className="w-full rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-70"
       >
         {pending ? "Creating account..." : "Create account"}
       </button>
