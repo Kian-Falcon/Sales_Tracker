@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { AppLogo } from "@/components/AppLogo";
+import { getAuthCallbackUrl } from "@/lib/site-url";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 import type { Department, ViewerDetails } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -295,13 +296,14 @@ export function UserSidebar({
       void (async () => {
         try {
           const supabase = createBrowserSupabaseClient();
+          const emailRedirectTo = getAuthCallbackUrl();
           const { data, error: updateError } = await supabase.auth.updateUser({
             email: email !== viewer.email ? email : undefined,
             data: {
               ...viewer.metadata,
               full_name: fullName
             }
-          });
+          }, { emailRedirectTo });
 
           if (updateError) {
             throw updateError;

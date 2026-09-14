@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition, type FormEvent } from "react";
 
 import { AuthPasswordField } from "@/components/AuthPasswordField";
+import { getAuthCallbackUrl } from "@/lib/site-url";
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 import type { Department } from "@/lib/types";
 
@@ -40,8 +41,7 @@ export function SignupForm() {
       void (async () => {
         try {
           const supabase = createBrowserSupabaseClient();
-          const emailRedirectTo =
-            typeof window === "undefined" ? undefined : `${window.location.origin}/api/auth/callback`;
+          const emailRedirectTo = getAuthCallbackUrl();
 
           const { data, error: signUpError } = await supabase.auth.signUp({
             email: email.trim().toLowerCase(),
