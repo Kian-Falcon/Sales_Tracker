@@ -52,14 +52,12 @@ type WorkspaceView = "grid" | "kanban" | "calendar";
 type ProjectStatusFilter = "all" | "active" | "overdue" | "done";
 type SortMode = "created-desc" | "created-asc" | "due-asc" | "priority" | "value-desc";
 type RowDensity = "compact" | "comfortable" | "tall";
-type WorkspacePreset = "all" | "active" | "my-team" | "overdue" | "recent" | "completed";
 type ProjectUiState = { kind: "creating" | "syncing"; label: string };
 
 const acceptedDocumentTypes = ".pdf,.csv,.xls,.xlsx,.doc,.docx,.txt,.zip,.png,.jpg,.jpeg";
 const dashboardPreferencesKey = "kf-workflow-dashboard-preferences";
 const workspaceViews: WorkspaceView[] = ["grid", "kanban", "calendar"];
 const sortModes: SortMode[] = ["created-desc", "created-asc", "due-asc", "priority", "value-desc"];
-const rowDensities: RowDensity[] = ["compact", "comfortable", "tall"];
 const gridProjectsPerPage = 100;
 const rowDensityClasses: Record<RowDensity, string> = {
   compact: "py-2",
@@ -113,10 +111,6 @@ function getProjectStatus(project: ProjectSummary): Exclude<ProjectStatusFilter,
   return "done";
 }
 
-function getDepartment(project: ProjectSummary): Department | null {
-  return project.current_stage?.responsible_dept ?? null;
-}
-
 function getProjectStatusLabel(status: ProjectStatusFilter) {
   if (status === "active") {
     return "Active";
@@ -132,16 +126,6 @@ function getProjectStatusLabel(status: ProjectStatusFilter) {
 
   return "All";
 }
-
-function isRecentProject(project: ProjectSummary) {
-  const createdAt = new Date(project.created_at).getTime();
-  if (Number.isNaN(createdAt)) {
-    return false;
-  }
-
-  return Date.now() - createdAt <= 7 * 24 * 60 * 60 * 1000;
-}
-
 function toProjectSummary(project: ProjectDetail): ProjectSummary {
   const currentStage = project.stages.find((stage) => stage.status === "active" || stage.status === "overdue") ?? null;
 
@@ -378,68 +362,6 @@ function toDateKey(dateValue: Date) {
   ).padStart(2, "0")}`;
 }
 
-function getActiveWorkspacePreset({
-  search,
-  clientFilter,
-  statusFilter,
-  departmentFilter,
-  overdueOnly,
-  sortMode,
-  viewerDepartment
-}: {
-  search: string;
-  clientFilter: string;
-  statusFilter: ProjectStatusFilter;
-  departmentFilter: string;
-  overdueOnly: boolean;
-  sortMode: SortMode;
-  viewerDepartment?: Department | null;
-}): WorkspacePreset | null {
-  if (search.trim()) {
-    return null;
-  }
-
-  if (clientFilter !== "all") {
-    return null;
-  }
-
-  if (
-    viewerDepartment &&
-    departmentFilter === viewerDepartment &&
-    statusFilter === "all" &&
-    !overdueOnly &&
-    sortMode === "due-asc"
-  ) {
-    return "my-team";
-  }
-
-  if (departmentFilter !== "all") {
-    return null;
-  }
-
-  if (statusFilter === "active" && !overdueOnly && sortMode === "due-asc") {
-    return "active";
-  }
-
-  if ((statusFilter === "overdue" || overdueOnly) && sortMode === "due-asc") {
-    return "overdue";
-  }
-
-  if (statusFilter === "done" && !overdueOnly && sortMode === "created-desc") {
-    return "completed";
-  }
-
-  if (statusFilter === "all" && !overdueOnly && sortMode === "created-desc") {
-    return "recent";
-  }
-
-  if (statusFilter === "all" && !overdueOnly && sortMode === "due-asc") {
-    return "all";
-  }
-
-  return null;
-}
-
 function TrashIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className} aria-hidden="true">
@@ -495,12 +417,10 @@ export function ProjectWorkspace({
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [view, setView] = useState<WorkspaceView>("grid");
   const [search, setSearch] = useState("");
-  const [clientFilter, setClientFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<ProjectStatusFilter>("all");
-  const [departmentFilter, setDepartmentFilter] = useState("all");
+  const [teamFilter, setTeamFilter] = useState("all");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("due-asc");
-  const [rowDensity, setRowDensity] = useState<RowDensity>("comfortable");
   const [gridPage, setGridPage] = useState(1);
   const [calendarMonth, setCalendarMonth] = useState(toMonthInputValue);
   const [quickCreateOpen, setQuickCreateOpen] = useState(queryNewProjectOpen);
@@ -520,6 +440,7 @@ export function ProjectWorkspace({
   const workspaceRequestIdRef = useRef(0);
   const workspaceMetaRequestIdRef = useRef(0);
   const deferredSearch = useDeferredValue(search.trim());
+  const rowDensity: RowDensity = "comfortable";
   const { pushToast } = useToast();
 
   useEffect(() => {
@@ -545,7 +466,6 @@ export function ProjectWorkspace({
         const parsed = JSON.parse(raw) as Partial<{
           view: WorkspaceView;
           sortMode: SortMode;
-          rowDensity: RowDensity;
         }>;
 
         if (parsed.view && workspaceViews.includes(parsed.view)) {
@@ -554,10 +474,6 @@ export function ProjectWorkspace({
 
         if (parsed.sortMode && sortModes.includes(parsed.sortMode)) {
           setSortMode(parsed.sortMode);
-        }
-
-        if (parsed.rowDensity && rowDensities.includes(parsed.rowDensity)) {
-          setRowDensity(parsed.rowDensity);
         }
       }
     } catch {
@@ -576,15 +492,14 @@ export function ProjectWorkspace({
       dashboardPreferencesKey,
       JSON.stringify({
         view,
-        sortMode,
-        rowDensity
+        sortMode
       })
     );
-  }, [preferencesHydrated, rowDensity, sortMode, view]);
+  }, [preferencesHydrated, sortMode, view]);
 
   useEffect(() => {
     setGridPage(1);
-  }, [clientFilter, deferredSearch, departmentFilter, overdueOnly, sortMode, statusFilter, view]);
+  }, [deferredSearch, overdueOnly, sortMode, statusFilter, teamFilter, view]);
 
   useEffect(() => {
     if (!preferencesHydrated) {
@@ -618,16 +533,15 @@ export function ProjectWorkspace({
   const workspaceQuery = useMemo(
     () => ({
       search: deferredSearch || undefined,
-      client: clientFilter !== "all" ? clientFilter : undefined,
       status: statusFilter,
-      department: departmentFilter !== "all" ? (departmentFilter as Department) : undefined,
+      department: teamFilter !== "all" ? (teamFilter as Department) : undefined,
       overdue_only: overdueOnly || undefined,
       sort: sortMode,
       page: view === "grid" ? gridPage : 1,
       page_size: gridProjectsPerPage,
       paginate: view === "grid"
     }),
-    [clientFilter, deferredSearch, departmentFilter, gridPage, overdueOnly, sortMode, statusFilter, view]
+    [deferredSearch, gridPage, overdueOnly, sortMode, statusFilter, teamFilter, view]
   );
 
   useEffect(() => {
@@ -675,8 +589,7 @@ export function ProjectWorkspace({
     };
   }, [preferencesHydrated, view, workspaceQuery, workspaceRefreshKey]);
 
-  const clients = workspaceMeta?.client_options ?? [];
-  const departments = workspaceMeta?.department_options ?? [];
+  const teams = workspaceMeta?.department_options ?? [];
   const filteredProjects = projects;
 
   const kanbanBuckets = useMemo(() => {
@@ -720,40 +633,9 @@ export function ProjectWorkspace({
 
   const hasActiveFilters =
     search.trim() ||
-    clientFilter !== "all" ||
     statusFilter !== "all" ||
-    departmentFilter !== "all" ||
+    teamFilter !== "all" ||
     overdueOnly;
-
-  const activePreset = useMemo(
-    () =>
-      getActiveWorkspacePreset({
-        search,
-        clientFilter,
-        statusFilter,
-        departmentFilter,
-        overdueOnly,
-        sortMode,
-        viewerDepartment
-      }),
-    [clientFilter, departmentFilter, overdueOnly, search, sortMode, statusFilter, viewerDepartment]
-  );
-
-  const presetCounts = useMemo(
-    () => ({
-      all: workspaceMeta?.preset_counts.all ?? projects.length,
-      active: workspaceMeta?.preset_counts.active ?? projects.filter((project) => getProjectStatus(project) === "active").length,
-      myTeam:
-        workspaceMeta?.preset_counts.my_team ??
-        (viewerDepartment ? projects.filter((project) => getDepartment(project) === viewerDepartment).length : 0),
-      overdue:
-        workspaceMeta?.preset_counts.overdue ?? projects.filter((project) => getProjectStatus(project) === "overdue").length,
-      recent: workspaceMeta?.preset_counts.recent ?? projects.filter((project) => isRecentProject(project)).length,
-      completed:
-        workspaceMeta?.preset_counts.completed ?? projects.filter((project) => getProjectStatus(project) === "done").length
-    }),
-    [projects, viewerDepartment, workspaceMeta]
-  );
 
   const projectCounts = useMemo(
     () => ({
@@ -808,34 +690,6 @@ export function ProjectWorkspace({
       cancelled = true;
     };
   }, [activeProjectDetail, activeProjectId]);
-
-  const focusLabel = useMemo(() => {
-    if (activePreset === "all") {
-      return "All projects";
-    }
-
-    if (activePreset === "active") {
-      return "Active projects";
-    }
-
-    if (activePreset === "my-team") {
-      return "My team";
-    }
-
-    if (activePreset === "overdue") {
-      return "Overdue focus";
-    }
-
-    if (activePreset === "recent") {
-      return "Created this week";
-    }
-
-    if (activePreset === "completed") {
-      return "Completed projects";
-    }
-
-    return hasActiveFilters ? "Custom filter set" : "All projects";
-  }, [activePreset, hasActiveFilters]);
 
   const displayedProject = activeProjectDetail;
   const displayedProjectError = activeProjectId && !displayedProject ? projectDetailError : null;
@@ -921,56 +775,6 @@ export function ProjectWorkspace({
       };
     });
     setProjectUiState(projectId, null);
-  }
-
-  function applyWorkspacePreset(preset: WorkspacePreset) {
-    setSearch("");
-    setClientFilter("all");
-    setQuickCreateOpen(false);
-    setView("grid");
-    replaceQuery({ new: null });
-
-    if (preset === "my-team" && viewerDepartment) {
-      setDepartmentFilter(viewerDepartment);
-      setStatusFilter("all");
-      setOverdueOnly(false);
-      setSortMode("due-asc");
-      return;
-    }
-
-    setDepartmentFilter("all");
-
-    if (preset === "active") {
-      setStatusFilter("active");
-      setOverdueOnly(false);
-      setSortMode("due-asc");
-      return;
-    }
-
-    if (preset === "overdue") {
-      setStatusFilter("overdue");
-      setOverdueOnly(true);
-      setSortMode("due-asc");
-      return;
-    }
-
-    if (preset === "recent") {
-      setStatusFilter("all");
-      setOverdueOnly(false);
-      setSortMode("created-desc");
-      return;
-    }
-
-    if (preset === "completed") {
-      setStatusFilter("done");
-      setOverdueOnly(false);
-      setSortMode("created-desc");
-      return;
-    }
-
-    setStatusFilter("all");
-    setOverdueOnly(false);
-    setSortMode("due-asc");
   }
 
   function replaceQuery(updates: Record<string, string | null>) {
@@ -1132,49 +936,11 @@ export function ProjectWorkspace({
         <section className="overflow-hidden border-y border-border bg-white">
           <div className="border-b border-border px-4 py-4 sm:px-5">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <ViewTab active={view === "grid"} onClick={() => setView("grid")} label="Grid" />
                   <ViewTab active={view === "kanban"} onClick={() => setView("kanban")} label="Kanban" />
                   <ViewTab active={view === "calendar"} onClick={() => setView("calendar")} label="Calendar" />
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Suggested views</p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <WorkspacePresetChip
-                      label="All projects"
-                      count={presetCounts.all}
-                      active={activePreset === "all"}
-                      onClick={() => applyWorkspacePreset("all")}
-                    />
-                    {viewerDepartment ? (
-                      <WorkspacePresetChip
-                        label="My team"
-                        count={presetCounts.myTeam}
-                        active={activePreset === "my-team"}
-                        onClick={() => applyWorkspacePreset("my-team")}
-                      />
-                    ) : null}
-                    <WorkspacePresetChip
-                      label="Overdue focus"
-                      count={presetCounts.overdue}
-                      active={activePreset === "overdue"}
-                      onClick={() => applyWorkspacePreset("overdue")}
-                    />
-                    <WorkspacePresetChip
-                      label="Created this week"
-                      count={presetCounts.recent}
-                      active={activePreset === "recent"}
-                      onClick={() => applyWorkspacePreset("recent")}
-                    />
-                    <WorkspacePresetChip
-                      label="Completed"
-                      count={presetCounts.completed}
-                      active={activePreset === "completed"}
-                      onClick={() => applyWorkspacePreset("completed")}
-                    />
-                  </div>
                 </div>
 
                 <div>
@@ -1195,32 +961,24 @@ export function ProjectWorkspace({
                   value={projectCounts.total}
                   tone="text-ink"
                   helper="All tracked projects"
-                  active={activePreset === "all"}
-                  onClick={() => applyWorkspacePreset("all")}
                 />
                 <SummaryStat
                   label="Active"
                   value={projectCounts.active}
                   tone="text-ink"
                   helper="Current live stages"
-                  active={activePreset === "active"}
-                  onClick={() => applyWorkspacePreset("active")}
                 />
                 <SummaryStat
                   label="Overdue"
                   value={projectCounts.overdue}
                   tone="text-danger"
                   helper="Needs follow-up now"
-                  active={activePreset === "overdue"}
-                  onClick={() => applyWorkspacePreset("overdue")}
                 />
                 <SummaryStat
                   label="Completed"
                   value={projectCounts.completed}
                   tone="text-success"
                   helper="Workflow fully done"
-                  active={activePreset === "completed"}
-                  onClick={() => applyWorkspacePreset("completed")}
                 />
               </div>
             </div>
@@ -1228,7 +986,7 @@ export function ProjectWorkspace({
 
           <div className="border-b border-border bg-surface-muted/35 px-4 py-4 sm:px-5">
             <div className="flex flex-col gap-4">
-              <div className="grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_repeat(5,minmax(0,0.8fr))]">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,0.8fr))]">
                 <ToolbarField label="Search">
                   <input
                     value={search}
@@ -1236,21 +994,6 @@ export function ProjectWorkspace({
                     placeholder="Search code, project, client, stage, or owner"
                     className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-accent"
                   />
-                </ToolbarField>
-
-                <ToolbarField label="Client">
-                  <select
-                    value={clientFilter}
-                    onChange={(event) => setClientFilter(event.target.value)}
-                    className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-accent"
-                  >
-                    <option value="all">All clients</option>
-                    {clients.map((client) => (
-                      <option key={client} value={client}>
-                        {client}
-                      </option>
-                    ))}
-                  </select>
                 </ToolbarField>
 
                 <ToolbarField label="Status">
@@ -1266,16 +1009,16 @@ export function ProjectWorkspace({
                   </select>
                 </ToolbarField>
 
-                <ToolbarField label="Department">
+                <ToolbarField label="Team">
                   <select
-                    value={departmentFilter}
-                    onChange={(event) => setDepartmentFilter(event.target.value)}
+                    value={teamFilter}
+                    onChange={(event) => setTeamFilter(event.target.value)}
                     className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-accent"
                   >
-                    <option value="all">All departments</option>
-                    {departments.map((department) => (
-                      <option key={department} value={department}>
-                        {department}
+                    <option value="all">All teams</option>
+                    {teams.map((team) => (
+                      <option key={team} value={team}>
+                        {team}
                       </option>
                     ))}
                   </select>
@@ -1294,26 +1037,10 @@ export function ProjectWorkspace({
                     <option value="value-desc">Highest value</option>
                   </select>
                 </ToolbarField>
-
-                <ToolbarField label="Row density">
-                  <select
-                    value={rowDensity}
-                    onChange={(event) => setRowDensity(event.target.value as RowDensity)}
-                    className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-accent"
-                  >
-                    <option value="compact">Compact</option>
-                    <option value="comfortable">Medium</option>
-                    <option value="tall">Tall</option>
-                  </select>
-                </ToolbarField>
               </div>
 
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-white px-3 py-2 text-sm font-medium text-ink/65">
-                    Focus: {focusLabel}
-                  </span>
-
                   <button
                     type="button"
                     onClick={() => setOverdueOnly((current) => !current)}
@@ -1331,9 +1058,8 @@ export function ProjectWorkspace({
                       type="button"
                       onClick={() => {
                         setSearch("");
-                        setClientFilter("all");
                         setStatusFilter("all");
-                        setDepartmentFilter("all");
+                        setTeamFilter("all");
                         setOverdueOnly(false);
                       }}
                       className="rounded-full border border-border bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:border-accent hover:bg-surface-muted/60"
@@ -1390,19 +1116,16 @@ export function ProjectWorkspace({
                   {search.trim() ? (
                     <ActiveFilterPill label={`Search: ${search.trim()}`} onClear={() => setSearch("")} />
                   ) : null}
-                  {clientFilter !== "all" ? (
-                    <ActiveFilterPill label={`Client: ${clientFilter}`} onClear={() => setClientFilter("all")} />
-                  ) : null}
                   {statusFilter !== "all" ? (
                     <ActiveFilterPill
                       label={`Status: ${getProjectStatusLabel(statusFilter)}`}
                       onClear={() => setStatusFilter("all")}
                     />
                   ) : null}
-                  {departmentFilter !== "all" ? (
+                  {teamFilter !== "all" ? (
                     <ActiveFilterPill
-                      label={`Department: ${departmentFilter}`}
-                      onClear={() => setDepartmentFilter("all")}
+                      label={`Team: ${teamFilter}`}
+                      onClear={() => setTeamFilter("all")}
                     />
                   ) : null}
                   {overdueOnly ? (
@@ -1568,32 +1291,19 @@ function SummaryStat({
   label,
   value,
   tone,
-  helper,
-  active,
-  onClick
+  helper
 }: {
   label: string;
   value: number;
   tone: string;
   helper: string;
-  active: boolean;
-  onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded-2xl border px-4 py-3 text-left transition",
-        active
-          ? "border-accent bg-accent/5 shadow-sm"
-          : "border-border bg-surface-muted/35 hover:border-accent/40 hover:bg-white"
-      )}
-    >
+    <div className="rounded-2xl border border-border bg-surface-muted/35 px-4 py-3 text-left">
       <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">{label}</div>
       <div className={`mt-2 text-2xl font-semibold tabular-nums ${tone}`}>{value}</div>
       <div className="mt-2 text-xs text-ink/50">{helper}</div>
-    </button>
+    </div>
   );
 }
 
@@ -1649,41 +1359,6 @@ function ActiveFilterPill({
     >
       <span>{label}</span>
       <span className="text-xs font-semibold text-ink/40">x</span>
-    </button>
-  );
-}
-
-function WorkspacePresetChip({
-  active,
-  label,
-  count,
-  onClick
-}: {
-  active: boolean;
-  label: string;
-  count: number;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-semibold transition",
-        active
-          ? "bg-accent text-white"
-          : "border border-border bg-white text-ink hover:border-accent hover:bg-surface-muted/60"
-      )}
-    >
-      <span>{label}</span>
-      <span
-        className={cn(
-          "rounded-full px-2 py-0.5 text-[11px] font-semibold",
-          active ? "bg-white/20 text-white" : "bg-surface-muted text-ink/55"
-        )}
-      >
-        {count}
-      </span>
     </button>
   );
 }

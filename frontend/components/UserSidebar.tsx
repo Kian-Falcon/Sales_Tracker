@@ -426,7 +426,9 @@ export function UserSidebar({
                         "group flex items-center rounded-[22px] transition",
                         showExpanded ? "gap-3 px-3 py-3" : "justify-center px-0 py-2.5",
                         isActive
-                          ? "bg-accent/10 text-accent"
+                          ? showExpanded
+                            ? "bg-accent/10 text-accent"
+                            : "text-accent"
                           : "text-ink/70 hover:bg-surface-muted hover:text-ink"
                       )}
                     >
