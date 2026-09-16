@@ -1023,7 +1023,7 @@ export function ProjectWorkspace({
           </p>
         ) : null}
 
-        <section className="overflow-hidden rounded-[28px] border border-border bg-white shadow-panel">
+        <section className="overflow-hidden border-y border-border bg-white">
           <div className="border-b border-border px-4 py-4 sm:px-5">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
               <div className="space-y-4">
@@ -1615,7 +1615,7 @@ function GridWorkspaceTable({
   }
 
   return (
-    <div className="overflow-hidden rounded-[24px] border border-border bg-white">
+    <div className="overflow-hidden border border-border bg-white">
       <div className="max-h-[65vh] overflow-auto overscroll-contain">
         <table className="min-w-[1140px] w-full border-collapse tabular-nums">
           <thead>

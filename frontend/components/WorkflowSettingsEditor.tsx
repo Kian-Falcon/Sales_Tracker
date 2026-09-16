@@ -182,7 +182,7 @@ export function WorkflowSettingsEditor({
               {phaseSettings.map((setting) => (
                 <article
                   key={setting.stage_key}
-                  className="grid gap-4 rounded-[28px] border border-ink/10 bg-white p-5 shadow-panel md:grid-cols-[minmax(0,1.45fr)_120px_220px_180px_160px]"
+                  className="grid gap-4 rounded-[28px] border border-ink/10 bg-white p-5 shadow-panel md:grid-cols-[minmax(0,1.45fr)_92px_220px_180px_160px]"
                 >
                   <div className="space-y-2">
                     <div className="space-y-2">
@@ -196,7 +196,7 @@ export function WorkflowSettingsEditor({
                     </p>
                   </div>
 
-                  <label className="space-y-2">
+                  <label className="space-y-2 self-start">
                     <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">
                       Enabled
                     </span>
@@ -217,17 +217,17 @@ export function WorkflowSettingsEditor({
                           )
                         )
                       }
-                      className="flex h-[46px] w-full items-center justify-center rounded-2xl border border-ink/10 bg-surface-muted/50 transition hover:border-accent"
+                      className="inline-flex items-center justify-start rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/20 focus-visible:ring-offset-1"
                     >
                       <span
                         aria-hidden="true"
-                        className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition ${
+                        className={`relative inline-flex h-6 w-14 shrink-0 items-center rounded-full p-[3px] transition ${
                           setting.is_enabled ? "bg-accent" : "bg-border"
                         }`}
                       >
                         <span
-                          className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition ${
-                            setting.is_enabled ? "translate-x-6" : "translate-x-1"
+                          className={`inline-block h-[18px] w-[18px] rounded-full bg-white shadow-sm transition ${
+                            setting.is_enabled ? "translate-x-8" : "translate-x-0"
                           }`}
                         />
                       </span>

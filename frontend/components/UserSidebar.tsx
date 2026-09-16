@@ -384,12 +384,10 @@ export function UserSidebar({
                   aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
                   title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
                   className={cn(
-                    "hidden items-center justify-center rounded-full border border-border text-xs font-semibold text-ink/70 transition hover:border-accent hover:bg-accent/5 hover:text-accent lg:inline-flex",
-                    collapsed ? "h-11 w-11" : "gap-2 px-4 py-2"
+                    "hidden h-11 w-11 items-center justify-center rounded-full border border-border text-xs font-semibold text-ink/70 transition hover:border-accent hover:bg-accent/5 hover:text-accent lg:inline-flex"
                   )}
                 >
                   {collapsed ? <ChevronRightIcon className="h-4 w-4" /> : <ChevronLeftIcon className="h-4 w-4" />}
-                  {!collapsed ? <span>Collapse</span> : null}
                 </button>
                 <button
                   type="button"
