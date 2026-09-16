@@ -1,7 +1,20 @@
 from models.comment import CommentCreate, CommentRead
 from models.common import CurrentUser, Department, DueDateRequestStatus, ProjectDocumentType, ProjectPriority, StagePhase, StageStatus
 from models.profile import MentionableProfileRead
-from models.project import DashboardSummary, ProjectCreate, ProjectDetail, ProjectDocumentRead, ProjectSummary, ProjectUpdate
+from models.project import (
+    DashboardSummary,
+    ProjectCreate,
+    ProjectDetail,
+    ProjectDocumentRead,
+    ProjectSummary,
+    ProjectUpdate,
+    ProjectWorkspaceMeta,
+    ProjectWorkspacePage,
+    ProjectWorkspacePresetCounts,
+    ProjectWorkspaceSort,
+    ProjectWorkspaceStatusFilter,
+    ProjectWorkspaceSummary,
+)
 from models.stage import (
     DueDateRequestAction,
     StageDueDateChangeRequestCreate,
@@ -28,6 +41,12 @@ __all__ = [
     "ProjectPriority",
     "ProjectSummary",
     "ProjectUpdate",
+    "ProjectWorkspaceMeta",
+    "ProjectWorkspacePage",
+    "ProjectWorkspacePresetCounts",
+    "ProjectWorkspaceSort",
+    "ProjectWorkspaceStatusFilter",
+    "ProjectWorkspaceSummary",
     "StageDueDateChangeRequestCreate",
     "StageDueDateChangeRequestRead",
     "StageDueDateChangeRequestReview",

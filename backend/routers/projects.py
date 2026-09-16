@@ -8,7 +8,7 @@ from time import perf_counter
 from uuid import UUID
 
 from asyncpg import UniqueViolationError
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
 
 from auth import get_current_user, require_departments
@@ -16,7 +16,19 @@ from config import Settings, get_settings
 from database import get_pool, record_to_dict, records_to_dicts, set_audit_actor, transaction
 from models.comment import CommentRead
 from models.common import CurrentUser, Department, ProjectDocumentType, StageSnapshot
-from models.project import ProjectCreate, ProjectDetail, ProjectDocumentRead, ProjectSummary, ProjectUpdate
+from models.project import (
+    ProjectCreate,
+    ProjectDetail,
+    ProjectDocumentRead,
+    ProjectSummary,
+    ProjectUpdate,
+    ProjectWorkspaceMeta,
+    ProjectWorkspacePage,
+    ProjectWorkspacePresetCounts,
+    ProjectWorkspaceSort,
+    ProjectWorkspaceStatusFilter,
+    ProjectWorkspaceSummary,
+)
 from models.profile import MentionableProfileRead
 from models.stage import StageDueDateChangeRequestRead, StageRead
 from observability import log_endpoint_timing
@@ -163,6 +175,154 @@ def _normalize_project_row(row: dict | None) -> dict | None:
         normalized["total_order_value"] = float(normalized["total_order_value"])
 
     return normalized
+
+
+def _project_workspace_cte() -> str:
+    return """
+        WITH project_overview AS (
+            SELECT
+                p.*,
+                s.id AS current_stage_id,
+                s.stage_key AS current_stage_key,
+                s.name AS current_stage_name,
+                s.phase AS current_stage_phase,
+                s.responsible_dept AS current_stage_dept,
+                s.status AS current_stage_status,
+                s.sort_order AS current_stage_sort_order,
+                s.activated_at AS current_stage_activated_at,
+                s.due_date AS current_stage_due_date,
+                stage_counts.completed_stages,
+                stage_counts.total_stages
+            FROM projects p
+            LEFT JOIN LATERAL (
+                SELECT *
+                FROM stages
+                WHERE project_id = p.id
+                  AND stage_key = ANY($1::text[])
+                  AND status IN ('active', 'overdue')
+                ORDER BY sort_order
+                LIMIT 1
+            ) s ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT
+                    COUNT(*) FILTER (WHERE status = 'done') AS completed_stages,
+                    COUNT(*) AS total_stages
+                FROM stages
+                WHERE project_id = p.id
+                  AND stage_key = ANY($1::text[])
+            ) stage_counts ON TRUE
+            WHERE p.is_archived = FALSE
+        )
+    """
+
+
+def _workspace_sort_clause(sort_mode: ProjectWorkspaceSort) -> str:
+    if sort_mode == ProjectWorkspaceSort.CREATED_ASC:
+        return "created_at ASC"
+
+    if sort_mode == ProjectWorkspaceSort.DUE_ASC:
+        return "current_stage_due_date ASC NULLS LAST, created_at DESC"
+
+    if sort_mode == ProjectWorkspaceSort.PRIORITY:
+        return """
+            CASE WHEN priority = 'accelerated' THEN 0 ELSE 1 END,
+            current_stage_due_date ASC NULLS LAST,
+            created_at DESC
+        """
+
+    if sort_mode == ProjectWorkspaceSort.VALUE_DESC:
+        return "total_order_value DESC NULLS LAST, created_at DESC"
+
+    return "created_at DESC"
+
+
+def _workspace_filter_sql(
+    *,
+    search: str | None,
+    client: str | None,
+    status_filter: ProjectWorkspaceStatusFilter,
+    department: Department | None,
+    overdue_only: bool,
+) -> tuple[str, list[object], int]:
+    clauses: list[str] = []
+    params: list[object] = []
+    next_index = 2
+
+    normalized_search = search.strip() if search else ""
+    if normalized_search:
+        clauses.append(
+            f"""(
+                project_code ILIKE ${next_index}
+                OR name ILIKE ${next_index}
+                OR client ILIKE ${next_index}
+                OR COALESCE(assigned_person_name, '') ILIKE ${next_index}
+                OR COALESCE(current_stage_name, '') ILIKE ${next_index}
+            )"""
+        )
+        params.append(f"%{normalized_search}%")
+        next_index += 1
+
+    if client:
+        clauses.append(f"client = ${next_index}")
+        params.append(client)
+        next_index += 1
+
+    if status_filter == ProjectWorkspaceStatusFilter.ACTIVE:
+        clauses.append("current_stage_status = 'active'")
+    elif status_filter == ProjectWorkspaceStatusFilter.OVERDUE:
+        clauses.append("current_stage_status = 'overdue'")
+    elif status_filter == ProjectWorkspaceStatusFilter.DONE:
+        clauses.append("current_stage_id IS NULL")
+
+    if department:
+        clauses.append(f"current_stage_dept = ${next_index}")
+        params.append(department.value)
+        next_index += 1
+
+    if overdue_only:
+        clauses.append("current_stage_status = 'overdue'")
+
+    return " AND ".join(clauses) if clauses else "TRUE", params, next_index
+
+
+def _build_project_summary(row: dict) -> ProjectSummary:
+    normalized = _normalize_project_row(row) or {}
+    snapshot = None
+    if normalized.get("current_stage_id"):
+        snapshot = StageSnapshot(
+            id=normalized["current_stage_id"],
+            name=normalized["current_stage_name"],
+            phase=normalized["current_stage_phase"],
+            responsible_dept=normalized["current_stage_dept"],
+            status=normalized["current_stage_status"],
+            stage_key=normalized["current_stage_key"],
+            sort_order=normalized["current_stage_sort_order"],
+            activated_at=normalized["current_stage_activated_at"],
+            due_date=normalized["current_stage_due_date"],
+        )
+
+    return ProjectSummary(
+        id=normalized["id"],
+        project_code=normalized["project_code"],
+        name=normalized["name"],
+        client=normalized["client"],
+        brand=normalized["brand"],
+        assigned_person_name=normalized.get("assigned_person_name"),
+        priority=normalized["priority"],
+        estimated_tat_days=normalized["estimated_tat_days"],
+        total_order_value=normalized["total_order_value"],
+        dispatch_date=normalized.get("dispatch_date"),
+        number_of_stores=normalized["number_of_stores"],
+        completed_stages=normalized.get("completed_stages") or 0,
+        total_stages=normalized.get("total_stages") or 0,
+        created_at=normalized["created_at"],
+        is_archived=normalized["is_archived"],
+        current_stage=snapshot,
+    )
+
+
+def _build_project_summaries(rows) -> list[ProjectSummary]:
+    return [_build_project_summary(row) for row in records_to_dicts(rows)]
 
 
 async def _load_project_assignee_profile(connection, assigned_person_email: str | None) -> dict | None:
@@ -429,6 +589,181 @@ async def load_project_detail(
     )
 
 
+@router.get("/workspace/meta", response_model=ProjectWorkspaceMeta)
+async def get_project_workspace_meta(
+    pool=Depends(get_pool),
+    user: CurrentUser = Depends(get_current_user),
+) -> ProjectWorkspaceMeta:
+    started_at = perf_counter()
+    status_label = "ok"
+    project_count = 0
+
+    try:
+        enabled_stage_keys = [template.stage_key for template in await load_stage_blueprint(pool)]
+        summary_query = f"""
+            {_project_workspace_cte()}
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE current_stage_status = 'active') AS active,
+                COUNT(*) FILTER (WHERE current_stage_status = 'overdue') AS overdue,
+                COUNT(*) FILTER (WHERE current_stage_id IS NULL) AS completed,
+                COUNT(*) FILTER (WHERE current_stage_dept = $2) AS my_team,
+                COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days') AS recent
+            FROM project_overview
+        """
+        department_query = f"""
+            {_project_workspace_cte()}
+            SELECT DISTINCT current_stage_dept
+            FROM project_overview
+            WHERE current_stage_dept IS NOT NULL
+            ORDER BY current_stage_dept
+        """
+
+        summary_row, client_rows, department_rows = await asyncio.gather(
+            pool.fetchrow(summary_query, enabled_stage_keys, user.department.value),
+            pool.fetch(
+                """
+                SELECT DISTINCT client
+                FROM projects
+                WHERE is_archived = FALSE
+                ORDER BY client
+                """
+            ),
+            pool.fetch(department_query, enabled_stage_keys),
+        )
+
+        summary = ProjectWorkspaceSummary(
+            total=int(summary_row["total"] or 0),
+            active=int(summary_row["active"] or 0),
+            overdue=int(summary_row["overdue"] or 0),
+            completed=int(summary_row["completed"] or 0),
+        )
+        preset_counts = ProjectWorkspacePresetCounts(
+            all=summary.total,
+            active=summary.active,
+            my_team=int(summary_row["my_team"] or 0),
+            overdue=summary.overdue,
+            recent=int(summary_row["recent"] or 0),
+            completed=summary.completed,
+        )
+        project_count = summary.total
+
+        return ProjectWorkspaceMeta(
+            client_options=[row["client"] for row in client_rows if row["client"]],
+            department_options=[Department(row["current_stage_dept"]) for row in department_rows if row["current_stage_dept"]],
+            summary=summary,
+            preset_counts=preset_counts,
+        )
+    except HTTPException as exc:
+        status_label = f"http_{exc.status_code}"
+        raise
+    except Exception:
+        status_label = "error"
+        raise
+    finally:
+        log_endpoint_timing(
+            logger,
+            "projects.workspace_meta",
+            started_at,
+            status=status_label,
+            viewer_department=user.department.value,
+            project_count=project_count,
+        )
+
+
+@router.get("/workspace", response_model=ProjectWorkspacePage)
+async def get_project_workspace(
+    search: str | None = Query(default=None),
+    client: str | None = Query(default=None),
+    status_filter: ProjectWorkspaceStatusFilter = Query(default=ProjectWorkspaceStatusFilter.ALL, alias="status"),
+    department: Department | None = Query(default=None),
+    overdue_only: bool = Query(default=False),
+    sort_mode: ProjectWorkspaceSort = Query(default=ProjectWorkspaceSort.DUE_ASC, alias="sort"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=250),
+    paginate: bool = Query(default=True),
+    pool=Depends(get_pool),
+    user: CurrentUser = Depends(get_current_user),
+) -> ProjectWorkspacePage:
+    started_at = perf_counter()
+    status_label = "ok"
+    project_count = 0
+
+    try:
+        enabled_stage_keys = [template.stage_key for template in await load_stage_blueprint(pool)]
+        where_clause, filter_params, next_index = _workspace_filter_sql(
+            search=search,
+            client=client,
+            status_filter=status_filter,
+            department=department,
+            overdue_only=overdue_only,
+        )
+        order_clause = _workspace_sort_clause(sort_mode)
+        query_params: list[object] = [enabled_stage_keys, *filter_params]
+        pagination_clause = ""
+
+        if paginate:
+            limit_index = next_index
+            offset_index = next_index + 1
+            pagination_clause = f"LIMIT ${limit_index} OFFSET ${offset_index}"
+            query_params.extend([page_size, (page - 1) * page_size])
+
+        rows = await pool.fetch(
+            f"""
+            {_project_workspace_cte()}
+            SELECT
+                project_overview.*,
+                COUNT(*) OVER() AS filtered_total_count
+            FROM project_overview
+            WHERE {where_clause}
+            ORDER BY {order_clause}
+            {pagination_clause}
+            """,
+            *query_params,
+        )
+
+        items = _build_project_summaries(rows)
+        project_count = len(items)
+        total_count = int(rows[0]["filtered_total_count"]) if rows else 0
+        if paginate and not rows and page > 1:
+            count_row = await pool.fetchrow(
+                f"""
+                {_project_workspace_cte()}
+                SELECT COUNT(*) AS total_count
+                FROM project_overview
+                WHERE {where_clause}
+                """,
+                enabled_stage_keys,
+                *filter_params,
+            )
+            total_count = int(count_row["total_count"] or 0) if count_row else 0
+        total_pages = max(1, (total_count + page_size - 1) // page_size) if paginate else 1
+
+        return ProjectWorkspacePage(
+            items=items,
+            total_count=total_count,
+            page=page if paginate else 1,
+            page_size=page_size if paginate else total_count,
+            total_pages=total_pages,
+            paginated=paginate,
+        )
+    except HTTPException as exc:
+        status_label = f"http_{exc.status_code}"
+        raise
+    except Exception:
+        status_label = "error"
+        raise
+    finally:
+        log_endpoint_timing(
+            logger,
+            "projects.workspace",
+            started_at,
+            status=status_label,
+            viewer_department=user.department.value,
+            project_count=project_count,
+        )
+
+
 @router.get("", response_model=list[ProjectSummary])
 async def list_projects(
     pool=Depends(get_pool),
@@ -479,44 +814,7 @@ async def list_projects(
             enabled_stage_keys,
         )
 
-        results: list[ProjectSummary] = []
-        for row in records_to_dicts(rows):
-            normalized = _normalize_project_row(row)
-            snapshot = None
-            if normalized["current_stage_id"]:
-                snapshot = StageSnapshot(
-                    id=normalized["current_stage_id"],
-                    name=normalized["current_stage_name"],
-                    phase=normalized["current_stage_phase"],
-                    responsible_dept=normalized["current_stage_dept"],
-                    status=normalized["current_stage_status"],
-                    stage_key=normalized["current_stage_key"],
-                    sort_order=normalized["current_stage_sort_order"],
-                    activated_at=normalized["current_stage_activated_at"],
-                    due_date=normalized["current_stage_due_date"],
-                )
-
-            results.append(
-                ProjectSummary(
-                    id=normalized["id"],
-                    project_code=normalized["project_code"],
-                    name=normalized["name"],
-                    client=normalized["client"],
-                    brand=normalized["brand"],
-                    assigned_person_name=normalized.get("assigned_person_name"),
-                    priority=normalized["priority"],
-                    estimated_tat_days=normalized["estimated_tat_days"],
-                    total_order_value=normalized["total_order_value"],
-                    dispatch_date=normalized.get("dispatch_date"),
-                    number_of_stores=normalized["number_of_stores"],
-                    completed_stages=normalized.get("completed_stages") or 0,
-                    total_stages=normalized.get("total_stages") or 0,
-                    created_at=normalized["created_at"],
-                    is_archived=normalized["is_archived"],
-                    current_stage=snapshot,
-                )
-            )
-
+        results = _build_project_summaries(rows)
         project_count = len(results)
         return results
     except HTTPException as exc:

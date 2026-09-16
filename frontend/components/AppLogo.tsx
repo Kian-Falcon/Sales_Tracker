@@ -6,7 +6,7 @@ type AppLogoProps = {
   className?: string;
   showWordmark?: boolean;
   showSubtitle?: boolean;
-  size?: "sm" | "md" | "lg" | "xl";
+  size?: "xs" | "sm" | "md" | "lg" | "xl";
   align?: "left" | "center";
   tone?: "light" | "dark";
   subtitle?: string;
@@ -14,6 +14,11 @@ type AppLogoProps = {
 };
 
 const logoSizes = {
+  xs: {
+    frame: "h-9 w-9 rounded-xl p-1.5",
+    wordmark: "h-8 w-[150px]",
+    subtitle: "text-[10px]"
+  },
   sm: {
     frame: "h-11 w-11 rounded-2xl p-2",
     wordmark: "h-10 w-[180px]",
@@ -64,6 +69,8 @@ export function AppLogo({
                   ? "260px"
                   : size === "md"
                     ? "216px"
+                    : size === "sm"
+                      ? "180px"
                     : "180px"
             }
             className={cn("object-contain", align === "center" ? "object-center" : "object-left")}
@@ -99,7 +106,7 @@ export function AppLogo({
           alt="Kian Falcon logo"
           fill
           priority={priority}
-          sizes={size === "lg" ? "64px" : size === "md" ? "56px" : "44px"}
+          sizes={size === "lg" ? "64px" : size === "md" ? "56px" : size === "sm" ? "44px" : "36px"}
           className="object-contain"
         />
       </div>

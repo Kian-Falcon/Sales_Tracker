@@ -9,6 +9,8 @@ export type Department =
 
 export type ProjectPriority = "normal" | "accelerated";
 export type ProjectDocumentType = "boq" | "costing_boq" | "attachment";
+export type WorkspaceProjectStatusFilter = "all" | "active" | "overdue" | "done";
+export type WorkspaceProjectSortMode = "created-desc" | "created-asc" | "due-asc" | "priority" | "value-desc";
 
 export interface ViewerDetails {
   id: string;
@@ -102,6 +104,50 @@ export interface ProjectSummary {
   created_at: string;
   is_archived: boolean;
   current_stage: StageSnapshot | null;
+}
+
+export interface ProjectWorkspaceSummary {
+  total: number;
+  active: number;
+  overdue: number;
+  completed: number;
+}
+
+export interface ProjectWorkspacePresetCounts {
+  all: number;
+  active: number;
+  my_team: number;
+  overdue: number;
+  recent: number;
+  completed: number;
+}
+
+export interface ProjectWorkspaceMeta {
+  client_options: string[];
+  department_options: Department[];
+  summary: ProjectWorkspaceSummary;
+  preset_counts: ProjectWorkspacePresetCounts;
+}
+
+export interface ProjectWorkspacePage {
+  items: ProjectSummary[];
+  total_count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  paginated: boolean;
+}
+
+export interface ProjectWorkspaceQuery {
+  search?: string;
+  client?: string;
+  status?: WorkspaceProjectStatusFilter;
+  department?: Department;
+  overdue_only?: boolean;
+  sort?: WorkspaceProjectSortMode;
+  page?: number;
+  page_size?: number;
+  paginate?: boolean;
 }
 
 export interface ProjectDocument {

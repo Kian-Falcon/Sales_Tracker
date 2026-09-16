@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from enum import Enum
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
@@ -65,6 +66,53 @@ class ProjectSummary(BaseModel):
     created_at: datetime
     is_archived: bool
     current_stage: StageSnapshot | None = None
+
+
+class ProjectWorkspaceStatusFilter(str, Enum):
+    ALL = "all"
+    ACTIVE = "active"
+    OVERDUE = "overdue"
+    DONE = "done"
+
+
+class ProjectWorkspaceSort(str, Enum):
+    CREATED_DESC = "created-desc"
+    CREATED_ASC = "created-asc"
+    DUE_ASC = "due-asc"
+    PRIORITY = "priority"
+    VALUE_DESC = "value-desc"
+
+
+class ProjectWorkspaceSummary(BaseModel):
+    total: int = 0
+    active: int = 0
+    overdue: int = 0
+    completed: int = 0
+
+
+class ProjectWorkspacePresetCounts(BaseModel):
+    all: int = 0
+    active: int = 0
+    my_team: int = 0
+    overdue: int = 0
+    recent: int = 0
+    completed: int = 0
+
+
+class ProjectWorkspaceMeta(BaseModel):
+    client_options: list[str] = Field(default_factory=list)
+    department_options: list[Department] = Field(default_factory=list)
+    summary: ProjectWorkspaceSummary = Field(default_factory=ProjectWorkspaceSummary)
+    preset_counts: ProjectWorkspacePresetCounts = Field(default_factory=ProjectWorkspacePresetCounts)
+
+
+class ProjectWorkspacePage(BaseModel):
+    items: list[ProjectSummary] = Field(default_factory=list)
+    total_count: int = 0
+    page: int = 1
+    page_size: int = 0
+    total_pages: int = 1
+    paginated: bool = True
 
 
 class ProjectDetail(BaseModel):

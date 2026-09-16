@@ -370,7 +370,7 @@ export function UserSidebar({
               )}
             >
               <AppLogo
-                size={compactDesktopSidebar ? "sm" : "md"}
+                size={compactDesktopSidebar ? "xs" : "md"}
                 showWordmark={showExpanded}
                 showSubtitle={showExpanded}
                 className={compactDesktopSidebar ? "justify-center" : ""}
@@ -384,10 +384,10 @@ export function UserSidebar({
                   aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
                   title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
                   className={cn(
-                    "hidden h-11 w-11 items-center justify-center rounded-full border border-border text-xs font-semibold text-ink/70 transition hover:border-accent hover:bg-accent/5 hover:text-accent lg:inline-flex"
+                    "hidden h-9 w-9 items-center justify-center rounded-full border border-border text-xs font-semibold text-ink/70 transition hover:border-accent hover:bg-accent/5 hover:text-accent lg:inline-flex"
                   )}
                 >
-                  {collapsed ? <ChevronRightIcon className="h-4 w-4" /> : <ChevronLeftIcon className="h-4 w-4" />}
+                  {collapsed ? <ChevronRightIcon className="h-3.5 w-3.5" /> : <ChevronLeftIcon className="h-3.5 w-3.5" />}
                 </button>
                 <button
                   type="button"
@@ -423,8 +423,8 @@ export function UserSidebar({
                       href={item.href}
                       title={item.label}
                       className={cn(
-                        "group flex items-center rounded-[22px] py-3 transition",
-                        showExpanded ? "gap-3 px-3" : "justify-center px-0",
+                        "group flex items-center rounded-[22px] transition",
+                        showExpanded ? "gap-3 px-3 py-3" : "justify-center px-0 py-2.5",
                         isActive
                           ? "bg-accent/10 text-accent"
                           : "text-ink/70 hover:bg-surface-muted hover:text-ink"
@@ -432,13 +432,13 @@ export function UserSidebar({
                     >
                       <span
                         className={cn(
-                          "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border text-xs font-semibold",
+                          "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-xs font-semibold",
                           isActive
                             ? "border-accent/15 bg-accent/10 text-accent"
                             : "border-border bg-white text-ink/65"
                         )}
                       >
-                        <Icon className="h-5 w-5" />
+                        <Icon className="h-4 w-4" />
                       </span>
 
                       <span className={cn("min-w-0 flex-1", !showExpanded && "lg:hidden")}>
@@ -472,7 +472,12 @@ export function UserSidebar({
               )}
             >
               <div className={cn("flex items-start gap-3", compactDesktopSidebar && "justify-center")}>
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-ink text-sm font-semibold text-white">
+                <div
+                  className={cn(
+                    "flex shrink-0 items-center justify-center bg-ink text-sm font-semibold text-white",
+                    compactDesktopSidebar ? "h-10 w-10 rounded-xl" : "h-12 w-12 rounded-2xl"
+                  )}
+                >
                   {getInitials(viewer?.fullName ?? "Workflow user")}
                 </div>
 
@@ -582,9 +587,9 @@ export function UserSidebar({
                     disabled={logoutPending}
                     aria-label="Logout"
                     title="Logout"
-                    className="flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-white text-ink transition hover:border-accent hover:bg-accent/5 hover:text-accent disabled:opacity-60"
+                    className="flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-white text-ink transition hover:border-accent hover:bg-accent/5 hover:text-accent disabled:opacity-60"
                   >
-                    <LogoutIcon className="h-5 w-5" />
+                    <LogoutIcon className="h-4 w-4" />
                   </button>
                 </div>
               )}

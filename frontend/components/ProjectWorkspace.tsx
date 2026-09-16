@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -21,6 +22,8 @@ import {
   createProject,
   deleteProject as deleteProjectRequest,
   getProject,
+  getProjectWorkspace,
+  getProjectWorkspaceMeta,
   updateProjectMetadata,
   uploadProjectDocument
 } from "@/lib/api";
@@ -32,6 +35,8 @@ import type {
   ProjectMetadataUpdateInput,
   ProjectPriority,
   ProjectSummary,
+  ProjectWorkspaceMeta,
+  ProjectWorkspacePage,
   StageStatus,
   ViewerDetails
 } from "@/lib/types";
@@ -55,11 +60,38 @@ const dashboardPreferencesKey = "kf-workflow-dashboard-preferences";
 const workspaceViews: WorkspaceView[] = ["grid", "kanban", "calendar"];
 const sortModes: SortMode[] = ["created-desc", "created-asc", "due-asc", "priority", "value-desc"];
 const rowDensities: RowDensity[] = ["compact", "comfortable", "tall"];
+const gridProjectsPerPage = 100;
 const rowDensityClasses: Record<RowDensity, string> = {
   compact: "py-2",
   comfortable: "py-3",
   tall: "py-4"
 };
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function buildPaginationItems(totalPages: number, currentPage: number): Array<number | "ellipsis"> {
+  if (totalPages <= 5) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const pages = new Set([1, currentPage - 1, currentPage, currentPage + 1, totalPages]);
+  const sortedPages = Array.from(pages)
+    .filter((page) => page >= 1 && page <= totalPages)
+    .sort((left, right) => left - right);
+
+  const items: Array<number | "ellipsis"> = [];
+  sortedPages.forEach((page, index) => {
+    const previousPage = sortedPages[index - 1];
+    if (previousPage && page - previousPage > 1) {
+      items.push("ellipsis");
+    }
+    items.push(page);
+  });
+
+  return items;
+}
 
 function resolvePanelTab(value: string | null): ProjectPanelTab {
   if (value === "pipeline" || value === "documents") {
@@ -444,11 +476,9 @@ function WarningIcon({ className }: { className?: string }) {
 }
 
 export function ProjectWorkspace({
-  projects: initialProjects,
   viewerDepartment,
   viewer
 }: {
-  projects: ProjectSummary[];
   viewerDepartment?: Department | null;
   viewer?: ViewerDetails | null;
 }) {
@@ -458,7 +488,11 @@ export function ProjectWorkspace({
   const queryUploadFailed = searchParams.get("upload") === "failed";
   const queryNewProjectOpen = searchParams.get("new") === "1";
   const queryPanelTab = queryUploadFailed ? "documents" : resolvePanelTab(searchParams.get("panel"));
-  const [projects, setProjects] = useState(initialProjects);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [workspaceMeta, setWorkspaceMeta] = useState<ProjectWorkspaceMeta | null>(null);
+  const [workspacePage, setWorkspacePage] = useState<ProjectWorkspacePage | null>(null);
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [view, setView] = useState<WorkspaceView>("grid");
   const [search, setSearch] = useState("");
   const [clientFilter, setClientFilter] = useState("all");
@@ -467,6 +501,7 @@ export function ProjectWorkspace({
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("due-asc");
   const [rowDensity, setRowDensity] = useState<RowDensity>("comfortable");
+  const [gridPage, setGridPage] = useState(1);
   const [calendarMonth, setCalendarMonth] = useState(toMonthInputValue);
   const [quickCreateOpen, setQuickCreateOpen] = useState(queryNewProjectOpen);
   const [deleteTarget, setDeleteTarget] = useState<ProjectSummary | null>(null);
@@ -480,11 +515,12 @@ export function ProjectWorkspace({
   const [projectDetailError, setProjectDetailError] = useState<string | null>(null);
   const [projectUiStates, setProjectUiStates] = useState<Record<string, ProjectUiState>>({});
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
+  const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0);
+  const [workspaceMetaRefreshKey, setWorkspaceMetaRefreshKey] = useState(0);
+  const workspaceRequestIdRef = useRef(0);
+  const workspaceMetaRequestIdRef = useRef(0);
+  const deferredSearch = useDeferredValue(search.trim());
   const { pushToast } = useToast();
-
-  useEffect(() => {
-    setProjects(initialProjects);
-  }, [initialProjects]);
 
   useEffect(() => {
     setQuickCreateOpen(queryNewProjectOpen);
@@ -546,52 +582,102 @@ export function ProjectWorkspace({
     );
   }, [preferencesHydrated, rowDensity, sortMode, view]);
 
-  const clients = useMemo(
-    () => Array.from(new Set(projects.map((project) => project.client))).sort((left, right) => left.localeCompare(right)),
-    [projects]
+  useEffect(() => {
+    setGridPage(1);
+  }, [clientFilter, deferredSearch, departmentFilter, overdueOnly, sortMode, statusFilter, view]);
+
+  useEffect(() => {
+    if (!preferencesHydrated) {
+      return;
+    }
+
+    let cancelled = false;
+    const requestId = workspaceMetaRequestIdRef.current + 1;
+    workspaceMetaRequestIdRef.current = requestId;
+
+    void getProjectWorkspaceMeta()
+      .then((response) => {
+        if (cancelled || requestId !== workspaceMetaRequestIdRef.current) {
+          return;
+        }
+
+        setWorkspaceMeta(response);
+      })
+      .catch((error) => {
+        if (cancelled || requestId !== workspaceMetaRequestIdRef.current) {
+          return;
+        }
+        console.error(error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [preferencesHydrated, workspaceMetaRefreshKey]);
+
+  const workspaceQuery = useMemo(
+    () => ({
+      search: deferredSearch || undefined,
+      client: clientFilter !== "all" ? clientFilter : undefined,
+      status: statusFilter,
+      department: departmentFilter !== "all" ? (departmentFilter as Department) : undefined,
+      overdue_only: overdueOnly || undefined,
+      sort: sortMode,
+      page: view === "grid" ? gridPage : 1,
+      page_size: gridProjectsPerPage,
+      paginate: view === "grid"
+    }),
+    [clientFilter, deferredSearch, departmentFilter, gridPage, overdueOnly, sortMode, statusFilter, view]
   );
-  const departments = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          projects
-            .map((project) => getDepartment(project))
-            .filter((department): department is Department => Boolean(department))
-        )
-      ).sort((left, right) => left.localeCompare(right)),
-    [projects]
-  );
 
-  const filteredProjects = useMemo(() => {
-    const matches = projects.filter((project) => {
-      if (!matchesSearch(project, search)) {
-        return false;
-      }
+  useEffect(() => {
+    if (!preferencesHydrated) {
+      return;
+    }
 
-      const projectStatus = getProjectStatus(project);
-      const projectDepartment = getDepartment(project);
+    let cancelled = false;
+    const requestId = workspaceRequestIdRef.current + 1;
+    workspaceRequestIdRef.current = requestId;
+    setWorkspaceLoading(true);
+    setWorkspaceError(null);
 
-      if (clientFilter !== "all" && project.client !== clientFilter) {
-        return false;
-      }
+    void getProjectWorkspace(workspaceQuery)
+      .then((response) => {
+        if (cancelled || requestId !== workspaceRequestIdRef.current) {
+          return;
+        }
 
-      if (statusFilter !== "all" && projectStatus !== statusFilter) {
-        return false;
-      }
+        setWorkspacePage(response);
+        setProjects(response.items);
+        if (view === "grid" && response.total_pages > 0 && response.page > response.total_pages) {
+          setGridPage(response.total_pages);
+        }
+      })
+      .catch((error) => {
+        if (cancelled || requestId !== workspaceRequestIdRef.current) {
+          return;
+        }
 
-      if (departmentFilter !== "all" && projectDepartment !== departmentFilter) {
-        return false;
-      }
+        setWorkspaceError(error instanceof Error ? error.message : "Unable to load the dashboard right now.");
+        setWorkspacePage(null);
+        setProjects([]);
+      })
+      .finally(() => {
+        if (cancelled || requestId !== workspaceRequestIdRef.current) {
+          return;
+        }
 
-      if (overdueOnly && project.current_stage?.status !== "overdue") {
-        return false;
-      }
+        setWorkspaceLoading(false);
+      });
 
-      return true;
-    });
+    return () => {
+      cancelled = true;
+    };
+  }, [preferencesHydrated, view, workspaceQuery, workspaceRefreshKey]);
 
-    return sortProjects(matches, sortMode);
-  }, [clientFilter, departmentFilter, overdueOnly, projects, search, sortMode, statusFilter]);
+  const clients = workspaceMeta?.client_options ?? [];
+  const departments = workspaceMeta?.department_options ?? [];
+  const filteredProjects = projects;
 
   const kanbanBuckets = useMemo(() => {
     const buckets: Record<string, ProjectSummary[]> = {
@@ -655,25 +741,33 @@ export function ProjectWorkspace({
 
   const presetCounts = useMemo(
     () => ({
-      all: projects.length,
-      active: projects.filter((project) => getProjectStatus(project) === "active").length,
-      myTeam: viewerDepartment ? projects.filter((project) => getDepartment(project) === viewerDepartment).length : 0,
-      overdue: projects.filter((project) => getProjectStatus(project) === "overdue").length,
-      recent: projects.filter((project) => isRecentProject(project)).length,
-      completed: projects.filter((project) => getProjectStatus(project) === "done").length
+      all: workspaceMeta?.preset_counts.all ?? projects.length,
+      active: workspaceMeta?.preset_counts.active ?? projects.filter((project) => getProjectStatus(project) === "active").length,
+      myTeam:
+        workspaceMeta?.preset_counts.my_team ??
+        (viewerDepartment ? projects.filter((project) => getDepartment(project) === viewerDepartment).length : 0),
+      overdue:
+        workspaceMeta?.preset_counts.overdue ?? projects.filter((project) => getProjectStatus(project) === "overdue").length,
+      recent: workspaceMeta?.preset_counts.recent ?? projects.filter((project) => isRecentProject(project)).length,
+      completed:
+        workspaceMeta?.preset_counts.completed ?? projects.filter((project) => getProjectStatus(project) === "done").length
     }),
-    [projects, viewerDepartment]
+    [projects, viewerDepartment, workspaceMeta]
   );
 
   const projectCounts = useMemo(
     () => ({
-      total: projects.length,
-      active: projects.filter((project) => getProjectStatus(project) === "active").length,
-      overdue: projects.filter((project) => getProjectStatus(project) === "overdue").length,
-      completed: projects.filter((project) => getProjectStatus(project) === "done").length
+      total: workspaceMeta?.summary.total ?? projects.length,
+      active: workspaceMeta?.summary.active ?? projects.filter((project) => getProjectStatus(project) === "active").length,
+      overdue: workspaceMeta?.summary.overdue ?? projects.filter((project) => getProjectStatus(project) === "overdue").length,
+      completed:
+        workspaceMeta?.summary.completed ?? projects.filter((project) => getProjectStatus(project) === "done").length
     }),
-    [projects]
+    [projects, workspaceMeta]
   );
+
+  const matchingProjectCount = workspacePage?.total_count ?? filteredProjects.length;
+  const totalGridPages = workspacePage?.total_pages ?? 1;
 
   const activeProjectDetail = activeProjectId ? projectDetailsById[activeProjectId] ?? null : null;
 
@@ -746,6 +840,13 @@ export function ProjectWorkspace({
   const displayedProject = activeProjectDetail;
   const displayedProjectError = activeProjectId && !displayedProject ? projectDetailError : null;
 
+  function refreshWorkspace(includeMeta = false) {
+    setWorkspaceRefreshKey((current) => current + 1);
+    if (includeMeta) {
+      setWorkspaceMetaRefreshKey((current) => current + 1);
+    }
+  }
+
   function setProjectUiState(projectId: string, nextState: ProjectUiState | null) {
     setProjectUiStates((current) => {
       if (!nextState) {
@@ -797,6 +898,7 @@ export function ProjectWorkspace({
   function handleProjectChange(updatedProject: ProjectDetail) {
     syncProjectLocally(updatedProject);
     setProjectUiState(updatedProject.id, null);
+    refreshWorkspace(true);
   }
 
   function handleProjectSyncStateChange(projectId: string, label: string | null) {
@@ -964,6 +1066,7 @@ export function ProjectWorkspace({
       const updatedProject = await updateProjectMetadata(project.id, patch);
       syncProjectLocally(updatedProject);
       setProjectUiState(project.id, null);
+      refreshWorkspace(true);
       pushToast({
         tone: "success",
         title: "Project updated",
@@ -994,6 +1097,7 @@ export function ProjectWorkspace({
       setProjectUiState(deleteTarget.id, null);
       setActionError(null);
       setActionNotice(`${deleteTarget.project_code} was deleted from the workspace.`);
+      refreshWorkspace(true);
       pushToast({
         tone: "success",
         title: "Project deleted",
@@ -1013,6 +1117,8 @@ export function ProjectWorkspace({
   return (
     <>
       <div className="space-y-4">
+        {workspaceError ? <p className="rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-ink">{workspaceError}</p> : null}
+
         {actionError ? <p className="rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-ink">{actionError}</p> : null}
 
         {actionNotice ? <p className="rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-ink">{actionNotice}</p> : null}
@@ -1237,7 +1343,7 @@ export function ProjectWorkspace({
                   ) : null}
 
                   <span className="rounded-full bg-white px-3 py-2 text-sm text-ink/55">
-                    {filteredProjects.length} matching row{filteredProjects.length === 1 ? "" : "s"}
+                    {matchingProjectCount} matching row{matchingProjectCount === 1 ? "" : "s"}
                   </span>
                 </div>
 
@@ -1332,6 +1438,7 @@ export function ProjectWorkspace({
                   ...current.filter((entry) => entry.id !== optimisticId && entry.id !== project.id)
                 ]);
                 storeProjectDetail(project);
+                refreshWorkspace(true);
                 setActiveProjectId(project.id);
                 setActivePanelTab(options.defaultTab);
                 setQuickCreateOpen(false);
@@ -1385,13 +1492,20 @@ export function ProjectWorkspace({
             />
           ) : null}
 
-          <div className="px-4 py-4 sm:px-5">
+          <div className={view === "grid" ? "px-0 py-0" : "px-4 py-4 sm:px-5"}>
             {view === "grid" ? (
               <GridWorkspaceTable
                 projects={filteredProjects}
+                loading={workspaceLoading}
+                currentPage={gridPage}
+                totalPages={totalGridPages}
+                totalCount={matchingProjectCount}
+                onPageChange={setGridPage}
                 viewerDepartment={viewerDepartment ?? undefined}
                 rowDensity={rowDensity}
-                hasProjectsInWorkspace={projects.length > 0}
+                hasProjectsInWorkspace={
+                  workspaceMeta ? workspaceMeta.summary.total > 0 : Boolean(projects.length || matchingProjectCount || hasActiveFilters)
+                }
                 hasActiveFilters={Boolean(hasActiveFilters)}
                 canCreateProjects={viewerDepartment === "Sales" || viewerDepartment === "Admin"}
                 projectUiStates={projectUiStates}
@@ -1576,6 +1690,11 @@ function WorkspacePresetChip({
 
 function GridWorkspaceTable({
   projects,
+  loading,
+  currentPage,
+  totalPages,
+  totalCount,
+  onPageChange,
   viewerDepartment,
   rowDensity,
   hasProjectsInWorkspace,
@@ -1587,6 +1706,11 @@ function GridWorkspaceTable({
   onPatchProject
 }: {
   projects: ProjectSummary[];
+  loading: boolean;
+  currentPage: number;
+  totalPages: number;
+  totalCount: number;
+  onPageChange: (page: number) => void;
   viewerDepartment?: Department;
   rowDensity: RowDensity;
   hasProjectsInWorkspace: boolean;
@@ -1599,6 +1723,22 @@ function GridWorkspaceTable({
 }) {
   const canEditProjects = viewerDepartment === "Sales" || viewerDepartment === "Admin";
   const canDeleteProjects = viewerDepartment === "Admin";
+  const shouldPaginate = totalPages > 1;
+  const safeCurrentPage = clamp(currentPage, 1, totalPages);
+  const pageStart = totalCount ? (safeCurrentPage - 1) * gridProjectsPerPage : 0;
+  const pageEnd = projects.length ? pageStart + projects.length : 0;
+  const visibleProjects = projects;
+  const paginationItems = shouldPaginate ? buildPaginationItems(totalPages, safeCurrentPage) : [];
+  const visibleStartLabel = totalCount && projects.length ? pageStart + 1 : 0;
+  const visibleEndLabel = totalCount && projects.length ? pageEnd : 0;
+
+  if (loading && !projects.length) {
+    return (
+      <div className="rounded-[24px] border border-border bg-surface-muted/20 px-5 py-8 text-sm text-ink/55">
+        Loading projects...
+      </div>
+    );
+  }
 
   if (!projects.length) {
     return (
@@ -1615,7 +1755,7 @@ function GridWorkspaceTable({
   }
 
   return (
-    <div className="overflow-hidden border border-border bg-white">
+    <div className="overflow-hidden border-x border-b border-border bg-white">
       <div className="max-h-[65vh] overflow-auto overscroll-contain">
         <table className="min-w-[1140px] w-full border-collapse tabular-nums">
           <thead>
@@ -1635,13 +1775,14 @@ function GridWorkspaceTable({
             </tr>
           </thead>
           <tbody>
-            {projects.map((project, index) => {
+            {visibleProjects.map((project, index) => {
+              const absoluteIndex = pageStart + index;
               const uiState = projectUiStates[project.id] ?? null;
               const isCreating = uiState?.kind === "creating";
               const isBusy = Boolean(uiState);
               const eta = getEta(project);
               const progress = getProgress(project);
-              const stickyBackground = index % 2 === 0 ? "bg-white" : "bg-surface-muted/20";
+              const stickyBackground = absoluteIndex % 2 === 0 ? "bg-white" : "bg-surface-muted/20";
 
               return (
                 <tr
@@ -1654,7 +1795,9 @@ function GridWorkspaceTable({
                   className={cn(
                     "group border-b border-ink/5 text-sm text-ink transition",
                     isCreating ? "cursor-default" : "cursor-pointer",
-                    index % 2 === 0 ? "bg-white hover:bg-surface-muted/35" : "bg-surface-muted/20 hover:bg-surface-muted/35"
+                    absoluteIndex % 2 === 0
+                      ? "bg-white hover:bg-surface-muted/35"
+                      : "bg-surface-muted/20 hover:bg-surface-muted/35"
                   )}
                 >
                   <td
@@ -1824,6 +1967,56 @@ function GridWorkspaceTable({
           </tbody>
         </table>
       </div>
+
+      {shouldPaginate ? (
+        <div className="flex flex-col gap-3 border-t border-border bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-ink/55">
+            Showing {visibleStartLabel}-{visibleEndLabel} of {totalCount} matching rows
+          </p>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onPageChange(clamp(safeCurrentPage - 1, 1, totalPages))}
+              disabled={safeCurrentPage === 1}
+              className="rounded-full border border-border bg-white px-3 py-2 text-sm font-medium text-ink transition hover:border-accent hover:bg-surface-muted/60 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Prev
+            </button>
+
+            {paginationItems.map((item, index) =>
+              item === "ellipsis" ? (
+                <span key={`ellipsis-${index}`} className="px-1 text-sm text-ink/35">
+                  ...
+                </span>
+              ) : (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => onPageChange(item)}
+                  className={cn(
+                    "min-w-10 rounded-full px-3 py-2 text-sm font-semibold transition",
+                    safeCurrentPage === item
+                      ? "bg-accent text-white"
+                      : "border border-border bg-white text-ink hover:border-accent hover:bg-surface-muted/60"
+                  )}
+                >
+                  {item}
+                </button>
+              )
+            )}
+
+            <button
+              type="button"
+              onClick={() => onPageChange(clamp(safeCurrentPage + 1, 1, totalPages))}
+              disabled={safeCurrentPage === totalPages}
+              className="rounded-full border border-border bg-white px-3 py-2 text-sm font-medium text-ink transition hover:border-accent hover:bg-surface-muted/60 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

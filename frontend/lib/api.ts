@@ -9,12 +9,33 @@ import type {
   ProjectDocumentType,
   ProjectMetadataUpdateInput,
   ProjectSummary,
+  ProjectWorkspaceMeta,
+  ProjectWorkspacePage,
+  ProjectWorkspaceQuery,
   WorkflowStageSetting,
   WorkflowStageSettingUpdateInput
 } from "@/lib/types";
 
 function getApiBaseUrl() {
   return process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+}
+
+function buildQueryString(query?: object) {
+  if (!query) {
+    return "";
+  }
+
+  const searchParams = new URLSearchParams();
+  Object.entries(query as Record<string, unknown>).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") {
+      return;
+    }
+
+    searchParams.set(key, String(value));
+  });
+
+  const serialized = searchParams.toString();
+  return serialized ? `?${serialized}` : "";
 }
 
 async function getBrowserAccessToken() {
@@ -98,6 +119,14 @@ async function apiFetch<T>(
 
 export function listProjects(accessToken?: string) {
   return apiFetch<ProjectSummary[]>("/api/v1/projects", {}, accessToken);
+}
+
+export function getProjectWorkspace(query?: ProjectWorkspaceQuery, accessToken?: string) {
+  return apiFetch<ProjectWorkspacePage>(`/api/v1/projects/workspace${buildQueryString(query)}`, {}, accessToken);
+}
+
+export function getProjectWorkspaceMeta(accessToken?: string) {
+  return apiFetch<ProjectWorkspaceMeta>("/api/v1/projects/workspace/meta", {}, accessToken);
 }
 
 export function getProject(projectId: string, accessToken?: string) {
