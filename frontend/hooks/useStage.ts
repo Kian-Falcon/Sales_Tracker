@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   completeStage,
   createComment,
+  reopenStage,
   requestStageDueDateChange,
   reviewStageDueDateRequest,
   setStageDueDate
@@ -15,6 +16,18 @@ export function useCompleteStageMutation() {
 
   return useMutation({
     mutationFn: (stageId: string) => completeStage(stageId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+    }
+  });
+}
+
+export function useReopenStageMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (stageId: string) => reopenStage(stageId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["projects"] });
       void queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });

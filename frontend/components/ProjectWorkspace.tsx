@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   useEffect,
   useMemo,
@@ -20,11 +20,11 @@ import { StatusChip } from "@/components/StatusChip";
 import {
   createProject,
   deleteProject as deleteProjectRequest,
+  getProject,
   updateProjectMetadata,
   uploadProjectDocument
 } from "@/lib/api";
 import type {
-  DashboardSummary,
   Department,
   ProjectCreateInput,
   ProjectDetail,
@@ -60,6 +60,14 @@ const rowDensityClasses: Record<RowDensity, string> = {
   comfortable: "py-3",
   tall: "py-4"
 };
+
+function resolvePanelTab(value: string | null): ProjectPanelTab {
+  if (value === "pipeline" || value === "documents") {
+    return value;
+  }
+
+  return "overview";
+}
 
 function getProjectStatus(project: ProjectSummary): Exclude<ProjectStatusFilter, "all"> {
   if (project.current_stage?.status === "overdue") {
@@ -115,6 +123,7 @@ function toProjectSummary(project: ProjectDetail): ProjectSummary {
     priority: project.priority,
     estimated_tat_days: project.estimated_tat_days,
     total_order_value: project.total_order_value,
+    dispatch_date: project.dispatch_date,
     number_of_stores: project.number_of_stores,
     completed_stages: project.stages.filter((stage) => stage.status === "done").length,
     total_stages: project.stages.length,
@@ -146,6 +155,7 @@ function applyProjectMetadataPatch(project: ProjectDetail, patch: ProjectMetadat
     priority: patch.priority ?? project.priority,
     estimated_tat_days: patch.estimated_tat_days === undefined ? project.estimated_tat_days : patch.estimated_tat_days,
     total_order_value: patch.total_order_value === undefined ? project.total_order_value : patch.total_order_value,
+    dispatch_date: patch.dispatch_date === undefined ? project.dispatch_date : patch.dispatch_date,
     number_of_stores: patch.number_of_stores === undefined ? project.number_of_stores : patch.number_of_stores,
     special_request: patch.special_request === undefined ? project.special_request : patch.special_request
   };
@@ -168,6 +178,7 @@ function buildOptimisticProjectSummary(
     priority: input.priority,
     estimated_tat_days: input.estimated_tat_days,
     total_order_value: input.total_order_value,
+    dispatch_date: input.dispatch_date ?? null,
     number_of_stores: null,
     completed_stages: 0,
     total_stages: 0,
@@ -434,30 +445,19 @@ function WarningIcon({ className }: { className?: string }) {
 
 export function ProjectWorkspace({
   projects: initialProjects,
-  summary,
   viewerDepartment,
-  viewer,
-  selectedProject,
-  selectedProjectId,
-  selectedProjectError,
-  initialPanelTab = "overview",
-  initialNewProjectOpen = false,
-  uploadFailed = false
+  viewer
 }: {
   projects: ProjectSummary[];
-  summary: DashboardSummary;
   viewerDepartment?: Department | null;
   viewer?: ViewerDetails | null;
-  selectedProject: ProjectDetail | null;
-  selectedProjectId: string | null;
-  selectedProjectError?: string | null;
-  initialPanelTab?: ProjectPanelTab;
-  initialNewProjectOpen?: boolean;
-  uploadFailed?: boolean;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const queryProjectId = searchParams.get("project");
+  const queryUploadFailed = searchParams.get("upload") === "failed";
+  const queryNewProjectOpen = searchParams.get("new") === "1";
+  const queryPanelTab = queryUploadFailed ? "documents" : resolvePanelTab(searchParams.get("panel"));
   const [projects, setProjects] = useState(initialProjects);
   const [view, setView] = useState<WorkspaceView>("grid");
   const [search, setSearch] = useState("");
@@ -468,18 +468,18 @@ export function ProjectWorkspace({
   const [sortMode, setSortMode] = useState<SortMode>("due-asc");
   const [rowDensity, setRowDensity] = useState<RowDensity>("comfortable");
   const [calendarMonth, setCalendarMonth] = useState(toMonthInputValue);
-  const [quickCreateOpen, setQuickCreateOpen] = useState(initialNewProjectOpen);
+  const [quickCreateOpen, setQuickCreateOpen] = useState(queryNewProjectOpen);
   const [deleteTarget, setDeleteTarget] = useState<ProjectSummary | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deletePending, setDeletePending] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(selectedProjectId);
-  const [activePanelTab, setActivePanelTab] = useState<ProjectPanelTab>(uploadFailed ? "documents" : initialPanelTab);
-  const [optimisticProject, setOptimisticProject] = useState<ProjectDetail | null>(null);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(queryProjectId);
+  const [activePanelTab, setActivePanelTab] = useState<ProjectPanelTab>(queryPanelTab);
+  const [projectDetailsById, setProjectDetailsById] = useState<Record<string, ProjectDetail>>({});
+  const [projectDetailError, setProjectDetailError] = useState<string | null>(null);
   const [projectUiStates, setProjectUiStates] = useState<Record<string, ProjectUiState>>({});
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
-  const [isRouting, startRoutingTransition] = useTransition();
   const { pushToast } = useToast();
 
   useEffect(() => {
@@ -487,16 +487,16 @@ export function ProjectWorkspace({
   }, [initialProjects]);
 
   useEffect(() => {
-    setQuickCreateOpen(initialNewProjectOpen);
-  }, [initialNewProjectOpen]);
+    setQuickCreateOpen(queryNewProjectOpen);
+  }, [queryNewProjectOpen]);
 
   useEffect(() => {
-    setActiveProjectId(selectedProjectId);
-  }, [selectedProjectId]);
+    setActiveProjectId(queryProjectId);
+  }, [queryProjectId]);
 
   useEffect(() => {
-    setActivePanelTab(uploadFailed ? "documents" : initialPanelTab);
-  }, [initialPanelTab, selectedProjectId, uploadFailed]);
+    setActivePanelTab(queryPanelTab);
+  }, [queryPanelTab]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -675,6 +675,46 @@ export function ProjectWorkspace({
     [projects]
   );
 
+  const activeProjectDetail = activeProjectId ? projectDetailsById[activeProjectId] ?? null : null;
+
+  useEffect(() => {
+    if (!activeProjectId) {
+      setProjectDetailError(null);
+      return;
+    }
+
+    if (activeProjectDetail) {
+      setProjectDetailError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setProjectDetailError(null);
+
+    void getProject(activeProjectId)
+      .then((project) => {
+        if (cancelled) {
+          return;
+        }
+
+        setProjectDetailsById((current) => ({
+          ...current,
+          [project.id]: project
+        }));
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        setProjectDetailError(error instanceof Error ? error.message : "Unable to load this project right now.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectDetail, activeProjectId]);
+
   const focusLabel = useMemo(() => {
     if (activePreset === "all") {
       return "All projects";
@@ -703,14 +743,8 @@ export function ProjectWorkspace({
     return hasActiveFilters ? "Custom filter set" : "All projects";
   }, [activePreset, hasActiveFilters]);
 
-  const displayedProject =
-    optimisticProject && optimisticProject.id === activeProjectId
-      ? optimisticProject
-      : selectedProject && selectedProject.id === activeProjectId
-        ? selectedProject
-        : null;
-
-  const displayedProjectError = activeProjectId === selectedProjectId ? selectedProjectError : null;
+  const displayedProject = activeProjectDetail;
+  const displayedProjectError = activeProjectId && !displayedProject ? projectDetailError : null;
 
   function setProjectUiState(projectId: string, nextState: ProjectUiState | null) {
     setProjectUiStates((current) => {
@@ -727,6 +761,25 @@ export function ProjectWorkspace({
     });
   }
 
+  function storeProjectDetail(project: ProjectDetail) {
+    setProjectDetailsById((current) => ({
+      ...current,
+      [project.id]: project
+    }));
+  }
+
+  function removeProjectDetail(projectId: string) {
+    setProjectDetailsById((current) => {
+      if (!(projectId in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[projectId];
+      return next;
+    });
+  }
+
   function syncProjectLocally(updatedProject: ProjectDetail) {
     setProjects((current) => {
       const nextSummary = toProjectSummary(updatedProject);
@@ -738,10 +791,7 @@ export function ProjectWorkspace({
 
       return current.map((entry) => (entry.id === updatedProject.id ? nextSummary : entry));
     });
-
-    setOptimisticProject((current) =>
-      current?.id === updatedProject.id || activeProjectId === updatedProject.id ? updatedProject : current
-    );
+    storeProjectDetail(updatedProject);
   }
 
   function handleProjectChange(updatedProject: ProjectDetail) {
@@ -754,21 +804,18 @@ export function ProjectWorkspace({
   }
 
   function handleProjectDocumentUploaded(projectId: string, document: ProjectDocument) {
-    setOptimisticProject((current) => {
-      const baseProject =
-        current && current.id === projectId
-          ? current
-          : selectedProject && selectedProject.id === projectId
-            ? selectedProject
-            : null;
-
+    setProjectDetailsById((current) => {
+      const baseProject = current[projectId];
       if (!baseProject) {
         return current;
       }
 
       return {
-        ...baseProject,
-        documents: [document, ...baseProject.documents.filter((entry) => entry.id !== document.id)]
+        ...current,
+        [projectId]: {
+          ...baseProject,
+          documents: [document, ...baseProject.documents.filter((entry) => entry.id !== document.id)]
+        }
       };
     });
     setProjectUiState(projectId, null);
@@ -825,7 +872,11 @@ export function ProjectWorkspace({
   }
 
   function replaceQuery(updates: Record<string, string | null>) {
-    const params = new URLSearchParams(searchParams.toString());
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
 
     Object.entries(updates).forEach(([key, value]) => {
       if (value === null || value === "") {
@@ -837,9 +888,7 @@ export function ProjectWorkspace({
     });
 
     const query = params.toString();
-    startRoutingTransition(() => {
-      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-    });
+    window.history.replaceState(window.history.state, "", query ? `${pathname}?${query}` : pathname);
   }
 
   function openProject(projectId: string, tab: ProjectPanelTab = "overview") {
@@ -885,12 +934,7 @@ export function ProjectWorkspace({
     setActionNotice(null);
 
     const previousProject = projects.find((entry) => entry.id === project.id) ?? project;
-    const previousDetail =
-      optimisticProject?.id === project.id
-        ? optimisticProject
-        : selectedProject?.id === project.id
-          ? selectedProject
-          : null;
+    const previousDetail = projectDetailsById[project.id] ?? null;
 
     setProjectUiState(project.id, { kind: "syncing", label: "Saving changes..." });
     setProjects((current) =>
@@ -906,12 +950,15 @@ export function ProjectWorkspace({
               estimated_tat_days:
                 patch.estimated_tat_days === undefined ? entry.estimated_tat_days : patch.estimated_tat_days,
               total_order_value:
-                patch.total_order_value === undefined ? entry.total_order_value : patch.total_order_value
+                patch.total_order_value === undefined ? entry.total_order_value : patch.total_order_value,
+              dispatch_date: patch.dispatch_date === undefined ? entry.dispatch_date : patch.dispatch_date
             }
           : entry
       )
     );
-    setOptimisticProject((current) => (current && current.id === project.id ? applyProjectMetadataPatch(current, patch) : current));
+    if (previousDetail) {
+      storeProjectDetail(applyProjectMetadataPatch(previousDetail, patch));
+    }
 
     try {
       const updatedProject = await updateProjectMetadata(project.id, patch);
@@ -922,11 +969,10 @@ export function ProjectWorkspace({
         title: "Project updated",
         description: "The grid row has been reconciled with the backend."
       });
-      router.refresh();
     } catch (error) {
       setProjects((current) => current.map((entry) => (entry.id === project.id ? previousProject : entry)));
       if (previousDetail) {
-        setOptimisticProject(previousDetail);
+        storeProjectDetail(previousDetail);
       }
       setProjectUiState(project.id, null);
       setActionError(error instanceof Error ? error.message : "Unable to save that change right now.");
@@ -944,7 +990,7 @@ export function ProjectWorkspace({
     try {
       await deleteProjectRequest(deleteTarget.id);
       setProjects((current) => current.filter((project) => project.id !== deleteTarget.id));
-      setOptimisticProject((current) => (current?.id === deleteTarget.id ? null : current));
+      removeProjectDetail(deleteTarget.id);
       setProjectUiState(deleteTarget.id, null);
       setActionError(null);
       setActionNotice(`${deleteTarget.project_code} was deleted from the workspace.`);
@@ -953,11 +999,10 @@ export function ProjectWorkspace({
         title: "Project deleted",
         description: `${deleteTarget.project_code} was removed from the shared workspace.`
       });
-      if (selectedProjectId === deleteTarget.id) {
+      if (activeProjectId === deleteTarget.id) {
         closeProject();
       }
       setDeleteTarget(null);
-      router.refresh();
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : "Unable to delete this project right now.");
     } finally {
@@ -972,7 +1017,7 @@ export function ProjectWorkspace({
 
         {actionNotice ? <p className="rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-ink">{actionNotice}</p> : null}
 
-        {uploadFailed && !selectedProjectId ? (
+        {queryUploadFailed && !activeProjectId ? (
           <p className="rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-ink">
             A project was created successfully, but its BOQ upload did not complete.
           </p>
@@ -1286,7 +1331,7 @@ export function ProjectWorkspace({
                   toProjectSummary(project),
                   ...current.filter((entry) => entry.id !== optimisticId && entry.id !== project.id)
                 ]);
-                setOptimisticProject(project);
+                storeProjectDetail(project);
                 setActiveProjectId(project.id);
                 setActivePanelTab(options.defaultTab);
                 setQuickCreateOpen(false);
@@ -1346,7 +1391,6 @@ export function ProjectWorkspace({
                 projects={filteredProjects}
                 viewerDepartment={viewerDepartment ?? undefined}
                 rowDensity={rowDensity}
-                isRouting={isRouting}
                 hasProjectsInWorkspace={projects.length > 0}
                 hasActiveFilters={Boolean(hasActiveFilters)}
                 canCreateProjects={viewerDepartment === "Sales" || viewerDepartment === "Admin"}
@@ -1396,7 +1440,7 @@ export function ProjectWorkspace({
         viewerName={viewer?.fullName ?? null}
         defaultTab={activePanelTab}
         projectSyncLabel={activeProjectId ? projectUiStates[activeProjectId]?.label ?? null : null}
-        uploadFailed={uploadFailed}
+        uploadFailed={queryUploadFailed}
         onProjectChange={handleProjectChange}
         onDocumentUpload={handleProjectDocumentUploaded}
         onProjectSyncStateChange={handleProjectSyncStateChange}
@@ -1534,7 +1578,6 @@ function GridWorkspaceTable({
   projects,
   viewerDepartment,
   rowDensity,
-  isRouting,
   hasProjectsInWorkspace,
   hasActiveFilters,
   canCreateProjects,
@@ -1546,7 +1589,6 @@ function GridWorkspaceTable({
   projects: ProjectSummary[];
   viewerDepartment?: Department;
   rowDensity: RowDensity;
-  isRouting: boolean;
   hasProjectsInWorkspace: boolean;
   hasActiveFilters: boolean;
   canCreateProjects: boolean;
@@ -1575,7 +1617,7 @@ function GridWorkspaceTable({
   return (
     <div className="overflow-hidden rounded-[24px] border border-border bg-white">
       <div className="max-h-[65vh] overflow-auto overscroll-contain">
-        <table className="min-w-[980px] w-full border-collapse tabular-nums">
+        <table className="min-w-[1140px] w-full border-collapse tabular-nums">
           <thead>
             <tr className="bg-surface-muted/70 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-ink/60">
               <th className="sticky left-0 top-0 z-30 min-w-[280px] border-b border-r border-border bg-surface-muted/95 px-4 py-3 backdrop-blur">
@@ -1587,6 +1629,7 @@ function GridWorkspaceTable({
               <th className="sticky top-0 z-20 border-b border-border bg-surface-muted/95 px-4 py-3 backdrop-blur">Priority</th>
               <th className="sticky top-0 z-20 border-b border-border bg-surface-muted/95 px-4 py-3 backdrop-blur">Assigned person</th>
               <th className="sticky top-0 z-20 border-b border-border bg-surface-muted/95 px-4 py-3 text-right backdrop-blur">Order value</th>
+              <th className="sticky top-0 z-20 border-b border-border bg-surface-muted/95 px-4 py-3 backdrop-blur">Dispatch date</th>
               <th className="sticky top-0 z-20 border-b border-border bg-surface-muted/95 px-4 py-3 backdrop-blur">Created</th>
               <th className="sticky right-0 top-0 z-30 border-b border-l border-border bg-surface-muted/95 px-4 py-3 text-right backdrop-blur">Actions</th>
             </tr>
@@ -1611,8 +1654,7 @@ function GridWorkspaceTable({
                   className={cn(
                     "group border-b border-ink/5 text-sm text-ink transition",
                     isCreating ? "cursor-default" : "cursor-pointer",
-                    index % 2 === 0 ? "bg-white hover:bg-surface-muted/35" : "bg-surface-muted/20 hover:bg-surface-muted/35",
-                    isRouting && "pointer-events-none opacity-75"
+                    index % 2 === 0 ? "bg-white hover:bg-surface-muted/35" : "bg-surface-muted/20 hover:bg-surface-muted/35"
                   )}
                 >
                   <td
@@ -1724,6 +1766,14 @@ function GridWorkspaceTable({
                       displayFormatter={(value) =>
                         value.trim() ? formatCurrency(Number(value)) : "Not set"
                       }
+                    />
+                  </td>
+                  <td className={cn("px-4", rowDensityClasses[rowDensity])}>
+                    <EditableDateCell
+                      disabled={!canEditProjects || isCreating}
+                      value={project.dispatch_date}
+                      emptyLabel="Not set"
+                      onSave={(nextValue) => onPatchProject(project, { dispatch_date: nextValue })}
                     />
                   </td>
                   <td className={cn("px-4 text-ink/65", rowDensityClasses[rowDensity])}>{formatDate(project.created_at)}</td>
@@ -1966,6 +2016,7 @@ function QuickCreateProjectRow({
     priority: "normal" as ProjectPriority,
     estimated_tat_days: "",
     total_order_value: "",
+    dispatch_date: "",
     special_request: ""
   });
 
@@ -1997,6 +2048,7 @@ function QuickCreateProjectRow({
       priority: form.priority,
       estimated_tat_days: Number(form.estimated_tat_days),
       total_order_value: Number(form.total_order_value),
+      dispatch_date: form.dispatch_date || undefined,
       special_request: form.special_request.trim() || undefined
     };
     const optimisticId = `project-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -2110,6 +2162,13 @@ function QuickCreateProjectRow({
               min={0}
               step="0.01"
             />
+            <WorkspaceInput
+              label="Dispatch date"
+              value={form.dispatch_date}
+              onChange={(event) => updateField("dispatch_date", event.target.value)}
+              placeholder=""
+              type="date"
+            />
 
             <label className="space-y-2 lg:col-span-2">
               <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Special request</span>
@@ -2173,7 +2232,7 @@ function WorkspaceInput({
   value: string;
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
   placeholder: string;
-  type?: "text" | "number";
+  type?: "text" | "number" | "date";
   min?: number;
   step?: string;
 }) {
@@ -2506,6 +2565,128 @@ function EditableTextCell({
       )}
     >
       {pending ? "Saving..." : displayValue}
+    </button>
+  );
+}
+
+function EditableDateCell({
+  disabled,
+  value,
+  emptyLabel,
+  onSave
+}: {
+  disabled: boolean;
+  value: string | null;
+  emptyLabel: string;
+  onSave: (value: string | null) => Promise<void>;
+}) {
+  const normalizedValue = value ?? "";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(normalizedValue);
+  const [pending, startTransition] = useTransition();
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!editing) {
+      setDraft(normalizedValue);
+    }
+  }, [editing, normalizedValue]);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+    }
+  }, [editing]);
+
+  const commit = () => {
+    const nextValue = draft.trim();
+    setEditing(false);
+
+    if (nextValue === normalizedValue) {
+      return;
+    }
+
+    startTransition(() => {
+      void onSave(nextValue || null);
+    });
+  };
+
+  const cancel = () => {
+    setDraft(normalizedValue);
+    setEditing(false);
+  };
+
+  if (editing && !disabled) {
+    return (
+      <div
+        onClick={(event) => event.stopPropagation()}
+        className="space-y-2 rounded-2xl border border-border bg-white p-3 shadow-sm"
+      >
+        <input
+          ref={inputRef}
+          type="date"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              cancel();
+              return;
+            }
+
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commit();
+            }
+          }}
+          className="w-full rounded-xl border border-border bg-surface-muted/20 px-3 py-2 text-sm text-ink outline-none transition focus:border-accent"
+        />
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={commit}
+            className="rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-accent/90"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={() => setDraft("")}
+            className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-accent hover:bg-surface-muted/35"
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={cancel}
+            className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-accent hover:bg-surface-muted/35"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={disabled || pending}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (!disabled) {
+          setEditing(true);
+        }
+      }}
+      className={cn(
+        "w-full rounded-xl px-3 py-2 text-left text-sm transition",
+        disabled
+          ? "cursor-default bg-transparent text-ink/70"
+          : "border border-transparent bg-surface-muted/45 text-ink hover:border-border hover:bg-white"
+      )}
+    >
+      {pending ? "Saving..." : normalizedValue ? formatDate(normalizedValue) : emptyLabel}
     </button>
   );
 }

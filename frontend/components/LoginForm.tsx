@@ -32,7 +32,6 @@ export function LoginForm() {
           }
 
           router.push("/dashboard");
-          router.refresh();
         } catch (caughtError) {
           setError(caughtError instanceof Error ? caughtError.message : "Unable to sign in.");
         }

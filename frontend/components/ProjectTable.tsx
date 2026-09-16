@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { StatusChip } from "@/components/StatusChip";
@@ -176,7 +175,6 @@ function getRowTone(project: ProjectSummary): {
 }
 
 export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTableProps) {
-  const router = useRouter();
   const [projectRows, setProjectRows] = useState(projects);
   const [clientFilter, setClientFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<ProjectStatusFilter>("all");
@@ -291,7 +289,6 @@ export function ProjectTable({ projects, canDeleteProjects = false }: ProjectTab
       setProjectRows((current) => current.filter((project) => project.id !== projectToDelete.id));
       setDeleteTarget(null);
       setActionNotice(`${projectToDelete.project_code} was deleted from the tracker.`);
-      router.refresh();
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : "Unable to delete this project right now.");
     } finally {

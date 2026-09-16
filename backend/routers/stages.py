@@ -1,5 +1,6 @@
 import logging
 from datetime import date, timedelta
+from time import perf_counter
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -14,8 +15,8 @@ from models.stage import (
     StageDueDateChangeRequestReview,
     StageDueDateUpdate,
 )
+from observability import log_endpoint_timing
 from routers.projects import load_project_detail
-from services.airtable_sync import sync_project_tree
 from services.notification import NotificationService
 from services.workflow_settings import get_due_days_by_stage_key
 
@@ -75,6 +76,13 @@ def _completion_timing_label(*, due_date: date | None, completed_on: date, previ
         return "completed_before_time"
 
     return "completed_on_time"
+
+
+def _reopened_stage_status(due_date: date | None) -> str:
+    if due_date is None:
+        return "active"
+
+    return "overdue" if due_date < date.today() else "active"
 
 
 async def _resolve_display_name(connection, user: CurrentUser) -> str:
@@ -150,122 +158,262 @@ async def complete_stage(
     settings: Settings = Depends(get_settings),
     user: CurrentUser = Depends(get_current_user),
 ):
+    started_at = perf_counter()
+    status_label = "ok"
+    project_id_for_log: UUID | str | None = None
+    stage_key_for_log: str | None = None
     notification_payload: dict | None = None
 
-    async with transaction(pool) as connection:
-        stage = await connection.fetchrow("SELECT * FROM stages WHERE id = $1", stage_id)
-        if stage is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stage not found.")
+    try:
+        async with transaction(pool) as connection:
+            stage = await connection.fetchrow("SELECT * FROM stages WHERE id = $1", stage_id)
+            if stage is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stage not found.")
 
-        if stage["responsible_dept"] != user.department.value and user.department != Department.ADMIN:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your stage to complete.")
+            project_id_for_log = stage["project_id"]
+            stage_key_for_log = stage["stage_key"]
 
-        if stage["status"] not in {"active", "overdue"}:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only active or overdue stages can be completed.")
+            if stage["responsible_dept"] != user.department.value and user.department != Department.ADMIN:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your stage to complete.")
 
-        if stage["stage_key"] in COSTING_BOQ_REQUIRED_STAGE_KEYS:
-            has_required_costing_boq = await _has_required_costing_boq(
-                connection,
-                project_id=stage["project_id"],
-                activated_at=stage["activated_at"],
-            )
-            if not has_required_costing_boq:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Upload the completed costing BOQ from the Documents tab before marking this R&D stage complete.",
+            if stage["status"] not in {"active", "overdue"}:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only active or overdue stages can be completed.")
+
+            if stage["stage_key"] in COSTING_BOQ_REQUIRED_STAGE_KEYS:
+                has_required_costing_boq = await _has_required_costing_boq(
+                    connection,
+                    project_id=stage["project_id"],
+                    activated_at=stage["activated_at"],
                 )
+                if not has_required_costing_boq:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Upload the completed costing BOQ from the Documents tab before marking this R&D stage complete.",
+                    )
 
-        completed_on = date.today()
-        timing_label = _completion_timing_label(
-            due_date=stage["due_date"],
-            completed_on=completed_on,
-            previous_status=stage["status"],
-        )
+            completed_on = date.today()
+            timing_label = _completion_timing_label(
+                due_date=stage["due_date"],
+                completed_on=completed_on,
+                previous_status=stage["status"],
+            )
 
-        await set_audit_actor(connection, user.user_id)
+            await set_audit_actor(connection, user.user_id)
 
-        await connection.execute(
-            """
-            UPDATE stages
-            SET status = 'done',
-                completed_at = NOW(),
-                completed_by = $2
-            WHERE id = $1
-            """,
-            stage_id,
-            user.user_id,
-        )
-
-        next_stage = await connection.fetchrow(
-            """
-            SELECT *
-            FROM stages
-            WHERE project_id = $1
-              AND sort_order > $2
-              AND status = 'pending'
-            ORDER BY sort_order
-            LIMIT 1
-            """,
-            stage["project_id"],
-            stage["sort_order"],
-        )
-
-        if next_stage is not None:
-            due_days = (await get_due_days_by_stage_key(connection)).get(next_stage["stage_key"])
-            next_due_date = next_stage["due_date"] if due_days is None else completed_on + timedelta(days=due_days)
             await connection.execute(
                 """
                 UPDATE stages
-                SET status = 'active',
-                    activated_at = NOW(),
-                    due_date = CASE WHEN $2::int IS NULL THEN due_date ELSE CURRENT_DATE + $2::int END
+                SET status = 'done',
+                    completed_at = NOW(),
+                    completed_by = $2
                 WHERE id = $1
                 """,
-                next_stage["id"],
-                due_days,
+                stage_id,
+                user.user_id,
             )
 
-            project_row = await connection.fetchrow(
+            next_stage = await connection.fetchrow(
                 """
-                SELECT project_code, name
-                FROM projects
-                WHERE id = $1
+                SELECT *
+                FROM stages
+                WHERE project_id = $1
+                  AND sort_order > $2
+                  AND status = 'pending'
+                ORDER BY sort_order
+                LIMIT 1
                 """,
                 stage["project_id"],
+                stage["sort_order"],
             )
-            next_stage_department = Department(next_stage["responsible_dept"])
-            recipients = await _list_profile_emails(connection, departments=[next_stage_department])
-            notification_payload = {
-                "project_code": project_row["project_code"] if project_row else "Project",
-                "project_name": project_row["name"] if project_row else "Workflow project",
-                "completed_stage_name": stage["name"],
-                "completed_stage_department": stage["responsible_dept"],
-                "next_stage_name": next_stage["name"],
-                "next_stage_department": next_stage["responsible_dept"],
-                "due_date": next_due_date,
-                "handoff_status": timing_label,
-                "recipients": recipients,
-                "project_url": f"{settings.frontend_url.rstrip('/')}/projects/{stage['project_id']}" if settings.frontend_url else None,
-            }
 
-        detail = await load_project_detail(
-            connection,
-            stage["project_id"],
-            viewer_department=user.department,
+            if next_stage is not None:
+                due_days = (await get_due_days_by_stage_key(connection)).get(next_stage["stage_key"])
+                next_due_date = next_stage["due_date"] if due_days is None else completed_on + timedelta(days=due_days)
+                await connection.execute(
+                    """
+                    UPDATE stages
+                    SET status = 'active',
+                        activated_at = NOW(),
+                        due_date = CASE WHEN $2::int IS NULL THEN due_date ELSE CURRENT_DATE + $2::int END
+                    WHERE id = $1
+                    """,
+                    next_stage["id"],
+                    due_days,
+                )
+
+                project_row = await connection.fetchrow(
+                    """
+                    SELECT project_code, name
+                    FROM projects
+                    WHERE id = $1
+                    """,
+                    stage["project_id"],
+                )
+                next_stage_department = Department(next_stage["responsible_dept"])
+                recipients = await _list_profile_emails(connection, departments=[next_stage_department])
+                notification_payload = {
+                    "project_code": project_row["project_code"] if project_row else "Project",
+                    "project_name": project_row["name"] if project_row else "Workflow project",
+                    "completed_stage_name": stage["name"],
+                    "completed_stage_department": stage["responsible_dept"],
+                    "next_stage_name": next_stage["name"],
+                    "next_stage_department": next_stage["responsible_dept"],
+                    "due_date": next_due_date,
+                    "handoff_status": timing_label,
+                    "recipients": recipients,
+                    "project_url": f"{settings.frontend_url.rstrip('/')}/projects/{stage['project_id']}" if settings.frontend_url else None,
+                }
+
+            detail = await load_project_detail(
+                connection,
+                stage["project_id"],
+                viewer_department=user.department,
+            )
+
+        if notification_payload:
+            if background_tasks is not None:
+                background_tasks.add_task(_send_stage_handoff_notification_task, settings, notification_payload)
+            else:
+                await _send_stage_handoff_notification_task(settings, notification_payload)
+
+        return detail
+    except HTTPException as exc:
+        status_label = f"http_{exc.status_code}"
+        raise
+    except Exception:
+        status_label = "error"
+        raise
+    finally:
+        log_endpoint_timing(
+            logger,
+            "stages.complete",
+            started_at,
+            status=status_label,
+            stage_id=stage_id,
+            project_id=project_id_for_log,
+            stage_key=stage_key_for_log,
+            viewer_department=user.department.value,
         )
 
-    if notification_payload:
-        if background_tasks is not None:
-            background_tasks.add_task(_send_stage_handoff_notification_task, settings, notification_payload)
-        else:
-            await _send_stage_handoff_notification_task(settings, notification_payload)
 
-    if background_tasks is not None:
-        background_tasks.add_task(sync_project_tree, pool, settings, stage["project_id"])
-    else:
-        await sync_project_tree(pool, settings, stage["project_id"])
+@router.patch("/{stage_id}/reopen", response_model=ProjectDetail)
+async def reopen_stage(
+    stage_id: UUID,
+    pool=Depends(get_pool),
+    settings: Settings = Depends(get_settings),
+    user: CurrentUser = Depends(get_current_user),
+) -> ProjectDetail:
+    started_at = perf_counter()
+    status_label = "ok"
+    project_id_for_log: UUID | str | None = None
+    stage_key_for_log: str | None = None
 
-    return detail
+    try:
+        async with transaction(pool) as connection:
+            stage = await connection.fetchrow("SELECT * FROM stages WHERE id = $1", stage_id)
+            if stage is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stage not found.")
+
+            project_id_for_log = stage["project_id"]
+            stage_key_for_log = stage["stage_key"]
+
+            if stage["status"] != "done":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Only completed stages can be marked incomplete.",
+                )
+
+            allowed_departments = {
+                Department.SALES.value,
+                Department.ADMIN.value,
+                stage["responsible_dept"],
+            }
+            if user.department.value not in allowed_departments:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only Sales, Admin, or the stage owner can mark a completed stage incomplete.",
+                )
+
+            await set_audit_actor(
+                connection,
+                user.user_id,
+                department=user.department.value,
+                jwt_department=Department.ADMIN.value,
+            )
+
+            await connection.execute(
+                """
+                UPDATE stages
+                SET status = $2,
+                    activated_at = NOW(),
+                    completed_at = NULL,
+                    completed_by = NULL
+                WHERE id = $1
+                """,
+                stage_id,
+                _reopened_stage_status(stage["due_date"]),
+            )
+
+            await connection.execute(
+                """
+                UPDATE stages
+                SET status = 'pending',
+                    activated_at = NULL,
+                    due_date = NULL,
+                    completed_at = NULL,
+                    completed_by = NULL
+                WHERE project_id = $1
+                  AND sort_order > $2
+                  AND status <> 'pending'
+                """,
+                stage["project_id"],
+                stage["sort_order"],
+            )
+
+            await connection.execute(
+                """
+                UPDATE stage_due_date_change_requests AS r
+                SET status = 'rejected',
+                    reviewed_by = $3,
+                    review_note = 'Automatically closed because an earlier workflow stage was marked incomplete.',
+                    reviewed_at = NOW(),
+                    updated_at = NOW()
+                FROM stages AS s
+                WHERE s.id = r.stage_id
+                  AND s.project_id = $1
+                  AND s.sort_order > $2
+                  AND r.status = 'pending'
+                """,
+                stage["project_id"],
+                stage["sort_order"],
+                user.user_id,
+            )
+
+            detail = await load_project_detail(
+                connection,
+                stage["project_id"],
+                settings=settings,
+                viewer_department=user.department,
+            )
+
+        return detail
+    except HTTPException as exc:
+        status_label = f"http_{exc.status_code}"
+        raise
+    except Exception:
+        status_label = "error"
+        raise
+    finally:
+        log_endpoint_timing(
+            logger,
+            "stages.reopen",
+            started_at,
+            status=status_label,
+            stage_id=stage_id,
+            project_id=project_id_for_log,
+            stage_key=stage_key_for_log,
+            viewer_department=user.department.value,
+        )
 
 
 @router.patch("/{stage_id}/due-date", response_model=ProjectDetail)
@@ -324,11 +472,6 @@ async def set_stage_due_date(
             stage["project_id"],
             viewer_department=user.department,
         )
-
-    if background_tasks is not None:
-        background_tasks.add_task(sync_project_tree, pool, settings, stage["project_id"])
-    else:
-        await sync_project_tree(pool, settings, stage["project_id"])
 
     return detail
 
@@ -448,11 +591,6 @@ async def request_stage_due_date_change(
         else:
             await _send_due_date_change_request_task(settings, notification_payload)
 
-    if background_tasks is not None:
-        background_tasks.add_task(sync_project_tree, pool, settings, stage["project_id"])
-    else:
-        await sync_project_tree(pool, settings, stage["project_id"])
-
     return detail
 
 
@@ -570,10 +708,5 @@ async def review_stage_due_date_request(
             background_tasks.add_task(_send_due_date_change_resolution_task, settings, notification_payload)
         else:
             await _send_due_date_change_resolution_task(settings, notification_payload)
-
-    if background_tasks is not None:
-        background_tasks.add_task(sync_project_tree, pool, settings, request_row["project_id"])
-    else:
-        await sync_project_tree(pool, settings, request_row["project_id"])
 
     return detail

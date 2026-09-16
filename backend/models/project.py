@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
@@ -16,6 +16,7 @@ class ProjectCreate(BaseModel):
     priority: ProjectPriority = ProjectPriority.NORMAL
     estimated_tat_days: int = Field(ge=1, le=3650)
     total_order_value: float = Field(ge=0)
+    dispatch_date: date | None = None
     number_of_stores: int | None = Field(default=None, ge=1, le=100000)
     special_request: str | None = Field(default=None, max_length=2000)
 
@@ -27,6 +28,7 @@ class ProjectUpdate(BaseModel):
     priority: ProjectPriority | None = None
     estimated_tat_days: int | None = Field(default=None, ge=1, le=3650)
     total_order_value: float | None = Field(default=None, ge=0)
+    dispatch_date: date | None = None
     number_of_stores: int | None = Field(default=None, ge=1, le=100000)
     special_request: str | None = Field(default=None, max_length=2000)
 
@@ -56,6 +58,7 @@ class ProjectSummary(BaseModel):
     priority: ProjectPriority = ProjectPriority.NORMAL
     estimated_tat_days: int | None = None
     total_order_value: float | None = None
+    dispatch_date: date | None = None
     number_of_stores: int | None = None
     completed_stages: int = 0
     total_stages: int = 0
@@ -74,6 +77,7 @@ class ProjectDetail(BaseModel):
     priority: ProjectPriority = ProjectPriority.NORMAL
     estimated_tat_days: int | None = None
     total_order_value: float | None = None
+    dispatch_date: date | None = None
     number_of_stores: int | None = None
     special_request: str | None = None
     created_by: UUID | None = None
@@ -81,6 +85,7 @@ class ProjectDetail(BaseModel):
     created_by_department: Department | None = None
     created_at: datetime
     is_archived: bool
+    enabled_stage_keys: list[str] = Field(default_factory=list)
     documents: list[ProjectDocumentRead] = Field(default_factory=list)
     stages: list[StageRead]
 
@@ -101,6 +106,7 @@ class ProjectExportRow(BaseModel):
     priority: ProjectPriority
     estimated_tat_days: int | None = None
     total_order_value: float | None = None
+    dispatch_date: str | None = None
     number_of_stores: int | None = None
     project_status: str
     current_stage: str | None = None

@@ -1,7 +1,6 @@
 import { createBrowserSupabaseClient } from "@/lib/supabase";
 import type {
   Comment,
-  DashboardSummary,
   MentionableUser,
   MonthlyReport,
   ProjectCreateInput,
@@ -120,6 +119,16 @@ export function updateProjectMetadata(
   );
 }
 
+export function reopenProject(projectId: string, accessToken?: string) {
+  return apiFetch<ProjectDetail>(
+    `/api/v1/projects/${projectId}/reopen`,
+    {
+      method: "PATCH"
+    },
+    accessToken
+  );
+}
+
 export function deleteProject(projectId: string, accessToken?: string) {
   return apiFetch<void>(
     `/api/v1/projects/${projectId}`,
@@ -128,10 +137,6 @@ export function deleteProject(projectId: string, accessToken?: string) {
     },
     accessToken
   );
-}
-
-export function getDashboardSummary(accessToken?: string) {
-  return apiFetch<DashboardSummary>("/api/v1/dashboard/summary", {}, accessToken);
 }
 
 export function getMonthlyReport(month?: string, accessToken?: string) {
@@ -195,6 +200,16 @@ export function uploadProjectDocument(
 export function completeStage(stageId: string, accessToken?: string) {
   return apiFetch<ProjectDetail>(
     `/api/v1/stages/${stageId}/complete`,
+    {
+      method: "PATCH"
+    },
+    accessToken
+  );
+}
+
+export function reopenStage(stageId: string, accessToken?: string) {
+  return apiFetch<ProjectDetail>(
+    `/api/v1/stages/${stageId}/reopen`,
     {
       method: "PATCH"
     },

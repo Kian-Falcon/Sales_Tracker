@@ -13,6 +13,7 @@ type FormState = {
   priority: ProjectPriority;
   estimated_tat_days: string;
   total_order_value: string;
+  dispatch_date: string;
   special_request: string;
 };
 
@@ -32,6 +33,7 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
     priority: "normal",
     estimated_tat_days: "",
     total_order_value: "",
+    dispatch_date: "",
     special_request: ""
   });
   const [boqFile, setBoqFile] = useState<File | null>(null);
@@ -146,6 +148,7 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
             priority: form.priority,
             estimated_tat_days: Number(form.estimated_tat_days),
             total_order_value: Number(form.total_order_value),
+            dispatch_date: form.dispatch_date || undefined,
             special_request: form.special_request.trim() || undefined
           });
 
@@ -283,6 +286,15 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
           inputMode="decimal"
           min={0}
         />
+        <label className="block space-y-2">
+          <span className="text-sm font-medium text-ink/70">Dispatch date</span>
+          <input
+            type="date"
+            value={form.dispatch_date}
+            onChange={(event) => updateField("dispatch_date", event.target.value)}
+            className="w-full rounded-2xl border border-ink/10 bg-surface-muted/50 px-4 py-3 text-sm outline-none transition focus:border-accent"
+          />
+        </label>
 
         <label className="block space-y-2 lg:col-span-2">
           <span className="text-sm font-medium text-ink/70">Special request</span>

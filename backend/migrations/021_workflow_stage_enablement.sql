@@ -1,0 +1,2 @@
+ALTER TABLE workflow_stage_settings
+  ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN NOT NULL DEFAULT TRUE;

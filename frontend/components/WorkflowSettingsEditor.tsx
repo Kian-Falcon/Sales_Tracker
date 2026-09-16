@@ -16,19 +16,27 @@ const departmentOptions: Department[] = [
   "Admin"
 ];
 
+function normalizeSettings(source: WorkflowStageSetting[]) {
+  return source.map((setting) => ({
+    ...setting,
+    is_enabled: setting.is_enabled !== false
+  }));
+}
+
 export function WorkflowSettingsEditor({
   initialSettings
 }: {
   initialSettings: WorkflowStageSetting[];
 }) {
   const updateWorkflowSettings = useUpdateWorkflowSettingsMutation();
-  const [settings, setSettings] = useState(initialSettings);
-  const [savedSettings, setSavedSettings] = useState(initialSettings);
+  const [settings, setSettings] = useState(() => normalizeSettings(initialSettings));
+  const [savedSettings, setSavedSettings] = useState(() => normalizeSettings(initialSettings));
   const [saveTarget, setSaveTarget] = useState<string | "all" | null>(null);
 
   useEffect(() => {
-    setSettings(initialSettings);
-    setSavedSettings(initialSettings);
+    const normalized = normalizeSettings(initialSettings);
+    setSettings(normalized);
+    setSavedSettings(normalized);
   }, [initialSettings]);
 
   const settingsByStageKey = useMemo(
@@ -44,6 +52,7 @@ export function WorkflowSettingsEditor({
     return source.map((setting) => ({
       stage_key: setting.stage_key,
       responsible_dept: setting.responsible_dept,
+      is_enabled: setting.is_enabled,
       default_due_days: setting.default_due_days
     }));
   }
@@ -53,6 +62,7 @@ export function WorkflowSettingsEditor({
     const saved = savedSettingsByStageKey.get(stageKey);
 
     return (
+      current?.is_enabled !== saved?.is_enabled ||
       current?.responsible_dept !== saved?.responsible_dept ||
       current?.default_due_days !== saved?.default_due_days
     );
@@ -70,7 +80,9 @@ export function WorkflowSettingsEditor({
   ) {
     setSaveTarget(target);
     try {
-      const updatedSettings = await updateWorkflowSettings.mutateAsync(buildPayload(nextSettings));
+      const updatedSettings = normalizeSettings(
+        await updateWorkflowSettings.mutateAsync(buildPayload(nextSettings))
+      );
       setSavedSettings(updatedSettings);
       setSettings((current) =>
         updatedSettings.map((updatedSetting) => {
@@ -117,7 +129,7 @@ export function WorkflowSettingsEditor({
           <h1 className="text-3xl font-semibold text-ink">Workflow settings</h1>
           <p className="max-w-3xl text-sm leading-7 text-ink/60">
             Tune stage ownership and SLA days without editing code. These changes apply to newly
-            created projects, and updated SLA days are used when future stages activate.
+            created projects and existing workflows.
           </p>
         </div>
 
@@ -145,6 +157,12 @@ export function WorkflowSettingsEditor({
         </div>
       </section>
 
+      {!settings.length ? (
+        <section className="rounded-[28px] border border-border bg-white px-5 py-6 text-sm text-ink/60 shadow-panel">
+          No workflow stages are available right now. Restart the backend or run the latest workflow migration, then refresh this page.
+        </section>
+      ) : null}
+
       {phaseOrder.map((phase) => {
         const phaseSettings = settings.filter((setting) => setting.phase === phase);
         if (!phaseSettings.length) {
@@ -164,10 +182,10 @@ export function WorkflowSettingsEditor({
               {phaseSettings.map((setting) => (
                 <article
                   key={setting.stage_key}
-                  className="grid gap-4 rounded-[28px] border border-ink/10 bg-white p-5 shadow-panel md:grid-cols-[minmax(0,1.3fr)_220px_180px_160px]"
+                  className="grid gap-4 rounded-[28px] border border-ink/10 bg-white p-5 shadow-panel md:grid-cols-[minmax(0,1.45fr)_120px_220px_180px_160px]"
                 >
                   <div className="space-y-2">
-                    <div>
+                    <div className="space-y-2">
                       <h3 className="text-lg font-semibold text-ink">{setting.name}</h3>
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">
                         {setting.stage_key}
@@ -177,6 +195,44 @@ export function WorkflowSettingsEditor({
                       Last updated {formatDateTime(setting.updated_at)}
                     </p>
                   </div>
+
+                  <label className="space-y-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">
+                      Enabled
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={setting.is_enabled}
+                      aria-label={`${setting.name} ${setting.is_enabled ? "enabled" : "disabled"} in pipeline`}
+                      onClick={() =>
+                        setSettings((current) =>
+                          current.map((item) =>
+                            item.stage_key === setting.stage_key
+                              ? {
+                                  ...item,
+                                  is_enabled: !item.is_enabled
+                                }
+                              : item
+                          )
+                        )
+                      }
+                      className="flex h-[46px] w-full items-center justify-center rounded-2xl border border-ink/10 bg-surface-muted/50 transition hover:border-accent"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition ${
+                          setting.is_enabled ? "bg-accent" : "bg-border"
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition ${
+                            setting.is_enabled ? "translate-x-6" : "translate-x-1"
+                          }`}
+                        />
+                      </span>
+                    </button>
+                  </label>
 
                   <label className="space-y-2">
                     <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">
@@ -250,7 +306,7 @@ export function WorkflowSettingsEditor({
                           : "Saved"}
                     </button>
                     <p className={`text-xs ${rowHasChanges(setting.stage_key) ? "text-ink/60" : "text-ink/45"}`}>
-                      {rowHasChanges(setting.stage_key) ? "Unsaved row changes" : "No row changes"}
+                      {rowHasChanges(setting.stage_key) ? "Unsaved row changes" : "Saved"}
                     </p>
                   </div>
                 </article>

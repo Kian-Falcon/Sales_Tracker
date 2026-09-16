@@ -1,6 +1,4 @@
 "use client";
-
-import { useRouter } from "next/navigation";
 import { useState, useTransition, type ChangeEvent } from "react";
 
 import { useToast } from "@/components/ToastProvider";
@@ -21,7 +19,6 @@ export function ProjectDocumentsPanel({
   viewerDepartment?: Department;
   onDocumentUpload?: (document: ProjectDocument) => void;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +46,6 @@ export function ProjectDocumentsPanel({
               ? "The finalized R&D costing file is now attached and the assignee, Sales, and Admin were notified."
               : "The file is now attached to this project record."
           });
-          router.refresh();
         } catch (caughtError) {
           setError(caughtError instanceof Error ? caughtError.message : "Unable to upload the document.");
         }

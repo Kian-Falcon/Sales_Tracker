@@ -7,6 +7,7 @@ import { StatusChip } from "@/components/StatusChip";
 import { useToast } from "@/components/ToastProvider";
 import {
   useCompleteStageMutation,
+  useReopenStageMutation,
   useRequestStageDueDateChangeMutation,
   useReviewStageDueDateRequestMutation,
   useSetDueDateMutation
@@ -41,6 +42,20 @@ function shouldResetOverdueStatus(currentStatus: Stage["status"], dueDate: strin
 
 function shouldAutoCollapseStage(status: Stage["status"]) {
   return status === "active" || status === "overdue" || status === "done";
+}
+
+function deriveReopenedStageStatus(dueDate: string | null): Stage["status"] {
+  if (!dueDate) {
+    return "active";
+  }
+
+  const reopenedDueDate = new Date(dueDate);
+  reopenedDueDate.setHours(0, 0, 0, 0);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return reopenedDueDate.getTime() < today.getTime() ? "overdue" : "active";
 }
 
 function buildReviewedRequest({
@@ -102,6 +117,7 @@ export function StageRow({
   onProjectSyncStateChange?: (projectId: string, label: string | null) => void;
 }) {
   const completeStage = useCompleteStageMutation();
+  const reopenStage = useReopenStageMutation();
   const setDueDate = useSetDueDateMutation();
   const requestDueDateChange = useRequestStageDueDateChangeMutation();
   const reviewDueDateRequest = useReviewStageDueDateRequestMutation();
@@ -141,6 +157,11 @@ export function StageRow({
   const canReviewRequests = viewerDepartment === "Sales" || viewerDepartment === "Admin";
   const canComment = ["active", "overdue"].includes(localStage.status);
   const isCompletedStage = localStage.status === "done";
+  const canReopenStage =
+    isCompletedStage &&
+    (viewerDepartment
+      ? [localStage.responsible_dept, "Sales", "Admin"].includes(viewerDepartment)
+      : false);
   const isCollapsibleStage = shouldAutoCollapseStage(localStage.status);
   const isCollapsedStage = isCollapsibleStage && !expanded;
   const canUploadCostingBoq =
@@ -296,6 +317,65 @@ export function StageRow({
       setExpanded(previousExpanded);
       setLocalStage(previousStage);
       setCompletionError(error instanceof Error ? error.message : "Unable to complete this stage right now.");
+    } finally {
+      setActivityNotice(null);
+      onProjectSyncStateChange?.(project.id, null);
+    }
+  };
+
+  const handleReopenStage = async () => {
+    if (!isCompletedStage || !canReopenStage) {
+      return;
+    }
+
+    const previousStage = localStage;
+    const previousProject = project;
+    const previousExpanded = expanded;
+    const reopenedAt = new Date().toISOString();
+    const reopenedStatus = deriveReopenedStageStatus(localStage.due_date);
+    const optimisticProject: ProjectDetail = {
+      ...project,
+      stages: project.stages
+        .filter((entry) => entry.sort_order <= localStage.sort_order)
+        .map((entry) =>
+          entry.id === localStage.id
+            ? {
+                ...entry,
+                status: reopenedStatus,
+                activated_at: reopenedAt,
+                completed_at: null,
+                completed_by: null
+              }
+            : entry
+        )
+    };
+
+    setCompletionError(null);
+    setActivityNotice("Marking stage incomplete and rewinding later handoffs...");
+    onProjectSyncStateChange?.(project.id, "Marking stage incomplete...");
+    setExpanded(true);
+    setLocalStage((current) => ({
+      ...current,
+      status: reopenedStatus,
+      activated_at: reopenedAt,
+      completed_at: null,
+      completed_by: null
+    }));
+    onProjectChange?.(optimisticProject);
+
+    try {
+      const updatedProject = await reopenStage.mutateAsync(localStage.id);
+      syncStageFromProject(updatedProject);
+      pushToast({
+        tone: "success",
+        title: "Stage marked incomplete",
+        description: `${localStage.name} is active again and later stages were moved back to pending.`
+      });
+    } catch (error) {
+      setExpanded(previousExpanded);
+      setLocalStage(previousStage);
+      onProjectChange?.(previousProject);
+      setCompletionError(error instanceof Error ? error.message : "Unable to mark this stage incomplete right now.");
     } finally {
       setActivityNotice(null);
       onProjectSyncStateChange?.(project.id, null);
@@ -521,6 +601,16 @@ export function StageRow({
               className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {completeStage.isPending ? "Saving..." : "Mark Complete"}
+            </button>
+          ) : null}
+          {isCompletedStage && canReopenStage ? (
+            <button
+              type="button"
+              disabled={reopenStage.isPending}
+              onClick={() => void handleReopenStage()}
+              className="rounded-full border border-border bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {reopenStage.isPending ? "Saving..." : "Mark incomplete"}
             </button>
           ) : null}
         </div>

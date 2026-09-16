@@ -95,6 +95,7 @@ export interface ProjectSummary {
   priority: ProjectPriority;
   estimated_tat_days: number | null;
   total_order_value: number | null;
+  dispatch_date: string | null;
   number_of_stores: number | null;
   completed_stages: number;
   total_stages: number;
@@ -128,6 +129,7 @@ export interface ProjectDetail {
   priority: ProjectPriority;
   estimated_tat_days: number | null;
   total_order_value: number | null;
+  dispatch_date: string | null;
   number_of_stores: number | null;
   special_request: string | null;
   created_by: string | null;
@@ -135,15 +137,9 @@ export interface ProjectDetail {
   created_by_department: Department | null;
   created_at: string;
   is_archived: boolean;
+  enabled_stage_keys: string[];
   documents: ProjectDocument[];
   stages: Stage[];
-}
-
-export interface DashboardSummary {
-  total_projects: number;
-  active_stages: number;
-  overdue_stages: number;
-  completed_stages: number;
 }
 
 export interface MonthlyReportOverview {
@@ -241,6 +237,7 @@ export interface ProjectCreateInput {
   priority: ProjectPriority;
   estimated_tat_days: number;
   total_order_value: number;
+  dispatch_date?: string;
   special_request?: string;
 }
 
@@ -251,6 +248,7 @@ export interface ProjectMetadataUpdateInput {
   priority?: ProjectPriority;
   estimated_tat_days?: number | null;
   total_order_value?: number | null;
+  dispatch_date?: string | null;
   number_of_stores?: number | null;
   special_request?: string | null;
 }
@@ -261,6 +259,7 @@ export interface WorkflowStageSetting {
   name: string;
   responsible_dept: Department;
   sort_order: number;
+  is_enabled: boolean;
   default_due_days: number | null;
   updated_at: string | null;
 }
@@ -268,5 +267,6 @@ export interface WorkflowStageSetting {
 export interface WorkflowStageSettingUpdateInput {
   stage_key: string;
   responsible_dept: Department;
+  is_enabled: boolean;
   default_due_days: number | null;
 }

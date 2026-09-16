@@ -49,14 +49,17 @@ export function ProjectRecordPanel({
   }, [defaultTab, projectId]);
 
   useEffect(() => {
-    if (project) {
+    if (!open || !projectId) {
+      setPanelProject(null);
+      return;
+    }
+
+    if (project && project.id === projectId) {
       setPanelProject(project);
       return;
     }
 
-    if (!open || !projectId) {
-      setPanelProject(null);
-    }
+    setPanelProject((current) => (current?.id === projectId ? current : null));
   }, [open, project, projectId]);
 
   const liveStage = useMemo(

@@ -1,3 +1,4 @@
+import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -86,11 +87,29 @@ async def _start_transaction_with_retry(pool: asyncpg.Pool) -> tuple[asyncpg.Con
     raise RuntimeError("Unable to start a database transaction.")
 
 
-async def set_audit_actor(connection: asyncpg.Connection, user_id: UUID | str | None) -> None:
-    if user_id is None:
+async def set_audit_actor(
+    connection: asyncpg.Connection,
+    user_id: UUID | str | None,
+    *,
+    department: str | None = None,
+    jwt_department: str | None = None,
+) -> None:
+    if user_id is None and not department and not jwt_department:
         return
 
-    await connection.execute("SELECT set_config('app.current_user_id', $1, true)", str(user_id))
+    if user_id is not None:
+        await connection.execute("SELECT set_config('app.current_user_id', $1, true)", str(user_id))
+
+    if department:
+        await connection.execute("SELECT set_config('app.current_user_department', $1, true)", department)
+
+    effective_jwt_department = jwt_department or department
+
+    if effective_jwt_department:
+        await connection.execute(
+            "SELECT set_config('request.jwt.claims', $1, true)",
+            json.dumps({"department": effective_jwt_department}),
+        )
 
 
 @asynccontextmanager

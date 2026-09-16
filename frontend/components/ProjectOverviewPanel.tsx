@@ -1,6 +1,4 @@
 "use client";
-
-import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition, type FormEvent } from "react";
 
 import { useToast } from "@/components/ToastProvider";
@@ -15,6 +13,7 @@ type FormState = {
   priority: ProjectPriority;
   estimated_tat_days: string;
   total_order_value: string;
+  dispatch_date: string;
   special_request: string;
 };
 
@@ -32,6 +31,7 @@ function buildFormState(project: ProjectDetail): FormState {
       project.total_order_value !== null && project.total_order_value !== undefined
         ? String(project.total_order_value)
         : "",
+    dispatch_date: project.dispatch_date ?? "",
     special_request: project.special_request ?? ""
   };
 }
@@ -45,7 +45,6 @@ export function ProjectOverviewPanel({
   viewerDepartment?: Department | null;
   onProjectChange?: (project: ProjectDetail) => void;
 }) {
-  const router = useRouter();
   const [project, setProject] = useState(initialProject);
   const [form, setForm] = useState<FormState>(() => buildFormState(initialProject));
   const [editorOpen, setEditorOpen] = useState(false);
@@ -100,6 +99,7 @@ export function ProjectOverviewPanel({
             priority: form.priority,
             estimated_tat_days: form.estimated_tat_days ? Number(form.estimated_tat_days) : null,
             total_order_value: form.total_order_value ? Number(form.total_order_value) : null,
+            dispatch_date: form.dispatch_date || null,
             special_request: form.special_request.trim() || null
           });
 
@@ -113,7 +113,6 @@ export function ProjectOverviewPanel({
             title: "Project updated",
             description: "The record fields were saved successfully."
           });
-          router.refresh();
         } catch (caughtError) {
           setError(caughtError instanceof Error ? caughtError.message : "Unable to update this project.");
         }
@@ -169,6 +168,11 @@ export function ProjectOverviewPanel({
             label="Total order value"
             value={formatCurrency(project.total_order_value)}
             muted={project.total_order_value === null || project.total_order_value === undefined}
+          />
+          <DetailCard
+            label="Dispatch date"
+            value={project.dispatch_date ? formatDate(project.dispatch_date) : "Not set"}
+            muted={!project.dispatch_date}
           />
           <DetailCard label="Created by" value={project.created_by_name ?? "Workflow user"} />
           <DetailCard
@@ -250,6 +254,15 @@ export function ProjectOverviewPanel({
                 inputMode="decimal"
                 min={0}
               />
+              <label className="block space-y-2">
+                <span className="text-sm font-medium text-ink/70">Dispatch date</span>
+                <input
+                  type="date"
+                  value={form.dispatch_date}
+                  onChange={(event) => updateField("dispatch_date", event.target.value)}
+                  className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm outline-none transition focus:border-accent"
+                />
+              </label>
 
               <label className="block space-y-2 lg:col-span-2">
                 <span className="text-sm font-medium text-ink/70">Special request</span>

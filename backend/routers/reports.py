@@ -1,8 +1,11 @@
+import logging
 from csv import writer
 from datetime import date, datetime, timedelta, timezone
 from io import StringIO
+from time import perf_counter
 from uuid import UUID
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
@@ -17,8 +20,12 @@ from models.report import (
     MonthlyReportRead,
     MonthlyReportTrendPoint,
 )
+from observability import log_endpoint_timing
+from services.workflow_settings import load_stage_blueprint
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
+logger = logging.getLogger(__name__)
+TRANSIENT_REPORT_ERRORS = (asyncpg.PostgresConnectionError, ConnectionError, OSError)
 
 REPORT_PROJECTS_CTE = """
 WITH report_projects AS (
@@ -279,6 +286,8 @@ def _build_trend_rows(month_start: date, month_end_exclusive: date, event_rows: 
 
 
 async def _build_monthly_report(connection, *, month_start: date, month_end_exclusive: date) -> MonthlyReportRead:
+    enabled_stage_keys = [template.stage_key for template in await load_stage_blueprint(connection)]
+
     project_rows = records_to_dicts(
         await connection.fetch(
             f"""
@@ -297,6 +306,7 @@ async def _build_monthly_report(connection, *, month_start: date, month_end_excl
                     ) AS completed_this_month
                 FROM stages s
                 JOIN report_projects rp ON rp.id = s.project_id
+                WHERE s.stage_key = ANY($3::text[])
                 GROUP BY s.project_id
             ),
             current_stage AS (
@@ -308,7 +318,8 @@ async def _build_monthly_report(connection, *, month_start: date, month_end_excl
                     s.due_date AS current_stage_due_date
                 FROM stages s
                 JOIN report_projects rp ON rp.id = s.project_id
-                WHERE s.status IN ('active', 'overdue')
+                WHERE s.stage_key = ANY($3::text[])
+                  AND s.status IN ('active', 'overdue')
                 ORDER BY s.project_id, s.sort_order
             )
             SELECT
@@ -346,6 +357,7 @@ async def _build_monthly_report(connection, *, month_start: date, month_end_excl
             """,
             month_start,
             month_end_exclusive,
+            enabled_stage_keys,
         )
     )
 
@@ -387,10 +399,12 @@ async def _build_monthly_report(connection, *, month_start: date, month_end_excl
                 ) AS avg_delay_days
             FROM stages s
             JOIN report_projects rp ON rp.id = s.project_id
+            WHERE s.stage_key = ANY($3::text[])
             GROUP BY s.responsible_dept
             """,
             month_start,
             month_end_exclusive,
+            enabled_stage_keys,
         )
     )
 
@@ -627,21 +641,85 @@ async def _build_monthly_report(connection, *, month_start: date, month_end_excl
     )
 
 
+async def _expire_report_pool_connections(pool) -> None:
+    expire_connections = getattr(pool, "expire_connections", None)
+    if expire_connections is None:
+        return
+
+    try:
+        await expire_connections()
+    except Exception:
+        logger.warning(
+            "Failed to expire pooled connections after a transient reports error.",
+            exc_info=True,
+        )
+
+
+async def _load_monthly_report(pool, *, month_start: date, month_end_exclusive: date) -> MonthlyReportRead:
+    for attempt in range(2):
+        try:
+            async with transaction(pool) as connection:
+                return await _build_monthly_report(
+                    connection,
+                    month_start=month_start,
+                    month_end_exclusive=month_end_exclusive,
+                )
+        except TRANSIENT_REPORT_ERRORS as exc:
+            logger.warning(
+                "Transient database connection failure while generating the monthly report "
+                "(attempt %s of 2).",
+                attempt + 1,
+                exc_info=True,
+            )
+            if attempt == 0:
+                await _expire_report_pool_connections(pool)
+                continue
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database connection was interrupted while generating the report. Please retry.",
+            ) from exc
+
+    raise RuntimeError("Monthly report retry loop exited unexpectedly.")
+
+
 @router.get("/monthly", response_model=MonthlyReportRead)
 async def get_monthly_report(
     month: str | None = None,
     pool=Depends(get_pool),
     user: CurrentUser = Depends(require_departments(Department.SALES, Department.ADMIN)),
 ) -> MonthlyReportRead:
-    _assert_reports_access(user)
-    month_start = _parse_report_month(month)
-    _, month_end_exclusive = _month_bounds(month_start)
+    started_at = perf_counter()
+    status_label = "ok"
+    report_project_count: int | None = None
+    month_label = month or "current"
 
-    async with transaction(pool) as connection:
-        return await _build_monthly_report(
-            connection,
+    try:
+        _assert_reports_access(user)
+        month_start = _parse_report_month(month)
+        month_label = month_start.strftime("%Y-%m")
+        _, month_end_exclusive = _month_bounds(month_start)
+        report = await _load_monthly_report(
+            pool,
             month_start=month_start,
             month_end_exclusive=month_end_exclusive,
+        )
+        report_project_count = len(report.projects)
+        return report
+    except HTTPException as exc:
+        status_label = f"http_{exc.status_code}"
+        raise
+    except Exception:
+        status_label = "error"
+        raise
+    finally:
+        log_endpoint_timing(
+            logger,
+            "reports.monthly",
+            started_at,
+            status=status_label,
+            month=month_label,
+            project_count=report_project_count,
+            viewer_department=user.department.value,
         )
 
 
@@ -651,15 +729,37 @@ async def export_monthly_report_csv(
     pool=Depends(get_pool),
     user: CurrentUser = Depends(require_departments(Department.SALES, Department.ADMIN)),
 ):
-    _assert_reports_access(user)
-    month_start = _parse_report_month(month)
-    _, month_end_exclusive = _month_bounds(month_start)
+    started_at = perf_counter()
+    status_label = "ok"
+    report_project_count: int | None = None
+    month_label = month or "current"
 
-    async with transaction(pool) as connection:
-        report = await _build_monthly_report(
-            connection,
+    try:
+        _assert_reports_access(user)
+        month_start = _parse_report_month(month)
+        month_label = month_start.strftime("%Y-%m")
+        _, month_end_exclusive = _month_bounds(month_start)
+        report = await _load_monthly_report(
+            pool,
             month_start=month_start,
             month_end_exclusive=month_end_exclusive,
+        )
+        report_project_count = len(report.projects)
+    except HTTPException as exc:
+        status_label = f"http_{exc.status_code}"
+        raise
+    except Exception:
+        status_label = "error"
+        raise
+    finally:
+        log_endpoint_timing(
+            logger,
+            "reports.monthly_csv",
+            started_at,
+            status=status_label,
+            month=month_label,
+            project_count=report_project_count,
+            viewer_department=user.department.value,
         )
 
     buffer = StringIO()

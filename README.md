@@ -69,3 +69,7 @@ See [docs/production-launch-checklist.md](docs/production-launch-checklist.md) f
 2. Test the full stage flow with real Admin, Sales, R&D, Production, Procurement, QC, and Dispatch users.
 3. Fill in env vars for Supabase, Render, and Resend.
 4. Expand end-to-end tests and enable the scheduler/notification flow against live data.
+ backend start command :
+cd backend
+.\venv\Scripts\Activate.ps1
+python dev_server.py

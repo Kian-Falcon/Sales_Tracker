@@ -5,11 +5,13 @@ from io import BytesIO
 from types import SimpleNamespace
 from uuid import uuid4
 
+import asyncpg
 import pytest
 from fastapi import HTTPException
 from starlette.datastructures import UploadFile
 
 from config import Settings
+from database import set_audit_actor
 from models.comment import CommentCreate
 from models.common import CurrentUser, Department, ProjectDocumentType, ProjectPriority, StagePhase, StageStatus
 from models.project import ProjectCreate, ProjectUpdate
@@ -46,11 +48,20 @@ def patch_transaction(monkeypatch, module, connection) -> None:
 
 
 def patch_audit_actor(monkeypatch, module, calls: list | None = None) -> None:
-    async def fake_set_audit_actor(_connection, user_id) -> None:
+    async def fake_set_audit_actor(_connection, user_id, **_kwargs) -> None:
         if calls is not None:
             calls.append(user_id)
 
     monkeypatch.setattr(module, "set_audit_actor", fake_set_audit_actor)
+
+
+class AuditActorConnection:
+    def __init__(self) -> None:
+        self.execute_calls: list[tuple[str, tuple]] = []
+
+    async def execute(self, sql: str, *args):
+        self.execute_calls.append((sql, args))
+        return "SELECT 1"
 
 
 class CreateProjectConnection:
@@ -103,9 +114,10 @@ class CreateProjectConnection:
                 "priority": args[4],
                 "estimated_tat_days": args[5],
                 "total_order_value": args[6],
-                "number_of_stores": args[7],
-                "special_request": args[8],
-                "created_by": args[9],
+                "dispatch_date": args[7],
+                "number_of_stores": args[8],
+                "special_request": args[9],
+                "created_by": args[10],
                 "created_at": datetime.now(timezone.utc),
                 "is_archived": False,
             }
@@ -243,10 +255,31 @@ class WorkflowSettingsConnection:
     def __init__(self) -> None:
         self.executemany_calls: list[tuple[str, list[tuple]]] = []
         self.execute_calls: list[tuple[str, tuple]] = []
+        self.workflow_rows = [
+            setting_row("costing_sop_logged", 10, Department.SALES, 1),
+            setting_row("costing_shared_rd", 20, Department.RD, 3),
+            setting_row("sample_development_started_rd", 30, Department.RD, 2),
+        ]
 
     async def executemany(self, sql: str, args: list[tuple]):
         self.executemany_calls.append((sql, args))
+        if "UPDATE workflow_stage_settings" in sql:
+            rows_by_stage_key = {row["stage_key"]: row for row in self.workflow_rows}
+            for stage_key, responsible_dept, is_enabled, default_due_days in args:
+                row = rows_by_stage_key.get(stage_key)
+                if row is None:
+                    continue
+                row["responsible_dept"] = responsible_dept
+                row["is_enabled"] = is_enabled
+                row["default_due_days"] = default_due_days
+                row["updated_at"] = datetime.now(timezone.utc)
         return None
+
+    async def fetch(self, sql: str, *args):
+        if "FROM workflow_stage_settings" in sql:
+            return list(self.workflow_rows)
+
+        raise AssertionError(f"Unexpected fetch SQL: {sql}")
 
     async def execute(self, sql: str, *args):
         self.execute_calls.append((sql, args))
@@ -255,6 +288,12 @@ class WorkflowSettingsConnection:
 
 class MonthlyReportConnection:
     def __init__(self) -> None:
+        self.execute_calls: list[tuple[str, tuple]] = []
+        self.workflow_rows = [
+            setting_row("costing_sop_logged", 10, Department.SALES, 1),
+            setting_row("costing_shared_rd", 20, Department.RD, 3),
+            setting_row("sample_development_started_rd", 30, Department.RD, 2),
+        ]
         self.project_rows = [
             {
                 "project_id": uuid4(),
@@ -391,6 +430,9 @@ class MonthlyReportConnection:
         ]
 
     async def fetch(self, sql: str, *args):
+        if "FROM workflow_stage_settings" in sql:
+            return list(self.workflow_rows)
+
         if "stage_counts AS" in sql and "current_stage AS" in sql:
             return list(self.project_rows)
 
@@ -404,6 +446,13 @@ class MonthlyReportConnection:
             return list(self.audit_rows)
 
         raise AssertionError(f"Unexpected fetch SQL: {sql}")
+
+    async def execute(self, sql: str, *args):
+        self.execute_calls.append((sql, args))
+        return "UPDATE 1"
+
+    async def executemany(self, sql: str, args: list[tuple]):
+        return None
 
 
 class ProjectDocumentPool:
@@ -496,13 +545,61 @@ class ProjectUpdateConnection:
     def __init__(self, project_id) -> None:
         self.project_id = project_id
         self.fetchrow_calls: list[tuple[str, tuple]] = []
+        self.project_row = {
+            "id": project_id,
+            "name": "Current Project",
+            "client": "Current Client",
+            "assigned_person_name": "Current Owner",
+            "priority": ProjectPriority.NORMAL.value,
+            "estimated_tat_days": 12,
+            "total_order_value": 150000.0,
+            "dispatch_date": None,
+            "number_of_stores": 5,
+            "special_request": None,
+            "is_archived": False,
+        }
 
     async def fetchrow(self, sql: str, *args):
         self.fetchrow_calls.append((sql, args))
+        if "SELECT *" in sql and "FROM projects" in sql:
+            return self.project_row
+
         if "UPDATE projects" in sql:
             return {"id": self.project_id}
 
         raise AssertionError(f"Unexpected fetchrow SQL: {sql}")
+
+
+class ReopenProjectConnection:
+    def __init__(
+        self,
+        project_id,
+        *,
+        last_completed_stage: dict | None,
+        incomplete_stage: dict | None = None,
+        project_exists: bool = True,
+    ) -> None:
+        self.project_id = project_id
+        self.project_exists = project_exists
+        self.last_completed_stage = last_completed_stage
+        self.incomplete_stage = incomplete_stage
+        self.execute_calls: list[tuple[str, tuple]] = []
+
+    async def fetchrow(self, sql: str, *args):
+        if "FROM projects" in sql and "is_archived = FALSE" in sql:
+            return {"id": self.project_id} if self.project_exists else None
+
+        if "status <> 'done'" in sql:
+            return self.incomplete_stage
+
+        if "status = 'done'" in sql and "ORDER BY sort_order DESC" in sql:
+            return self.last_completed_stage
+
+        raise AssertionError(f"Unexpected fetchrow SQL: {sql}")
+
+    async def execute(self, sql: str, *args):
+        self.execute_calls.append((sql, args))
+        return "UPDATE 1"
 
 
 class ProjectDetailConnection:
@@ -511,6 +608,7 @@ class ProjectDetailConnection:
         self.sales_stage_id = uuid4()
         self.rd_stage_id = uuid4()
         self.future_stage_id = uuid4()
+        self.executemany_calls: list[tuple[str, list[tuple]]] = []
         self.project_row = {
             "id": project_id,
             "project_code": "P0099",
@@ -593,6 +691,18 @@ class ProjectDetailConnection:
                 "created_at": datetime.now(timezone.utc),
             },
         ]
+        self.workflow_rows = [
+            setting_row("costing_sop_logged", 10, Department.SALES, 1),
+            setting_row("costing_shared_rd", 20, Department.RD, 3),
+            setting_row("sample_development_started_rd", 30, Department.RD, 2),
+        ]
+
+    async def executemany(self, sql: str, args: list[tuple]):
+        self.executemany_calls.append((sql, args))
+        return None
+
+    async def execute(self, sql: str, *args):
+        return "UPDATE 1"
 
     async def fetchrow(self, sql: str, *args):
         if "FROM projects pr" in sql:
@@ -613,6 +723,9 @@ class ProjectDetailConnection:
 
         if "FROM project_documents" in sql:
             return []
+
+        if "FROM workflow_stage_settings" in sql:
+            return list(self.workflow_rows)
 
         raise AssertionError(f"Unexpected fetch SQL: {sql}")
 
@@ -732,13 +845,39 @@ def stage_row(**overrides) -> dict:
     return data
 
 
-def setting_row(stage_key: str, sort_order: int, dept: Department, due_days: int | None) -> dict:
+def test_set_audit_actor_allows_jwt_department_override() -> None:
+    connection = AuditActorConnection()
+    user_id = uuid4()
+
+    run_async(
+        set_audit_actor(
+            connection,
+            user_id,
+            department=Department.SALES.value,
+            jwt_department=Department.ADMIN.value,
+        )
+    )
+
+    assert connection.execute_calls[0][1] == (str(user_id),)
+    assert connection.execute_calls[1][1] == (Department.SALES.value,)
+    assert connection.execute_calls[2][1] == ('{"department": "Admin"}',)
+
+
+def setting_row(
+    stage_key: str,
+    sort_order: int,
+    dept: Department,
+    due_days: int | None,
+    *,
+    is_enabled: bool = True,
+) -> dict:
     return {
         "stage_key": stage_key,
         "phase": StagePhase.COSTING.value,
         "name": stage_key.replace("_", " ").title(),
         "responsible_dept": dept.value,
         "sort_order": sort_order,
+        "is_enabled": is_enabled,
         "default_due_days": due_days,
         "updated_at": datetime.now(timezone.utc),
     }
@@ -829,6 +968,7 @@ def test_create_project_seeds_first_stage_active_and_dates_it(monkeypatch) -> No
             "created_by_department": Department.SALES.value,
             "estimated_tat_days": 21,
             "total_order_value": 125000.0,
+            "dispatch_date": None,
             "special_request": "Complete sampling before festive launch.",
             "current_stage_name": "Costing SOP Logged In",
             "recipients": ["admin@example.com", "nirvaan@example.com", "sales@example.com"],
@@ -1027,6 +1167,194 @@ def test_complete_stage_rejects_wrong_department(monkeypatch) -> None:
 
     assert exc.value.status_code == 403
     assert exc.value.detail == "Not your stage to complete."
+    assert connection.execute_calls == []
+
+
+def test_reopen_project_reactivates_last_completed_stage(monkeypatch) -> None:
+    project_id = uuid4()
+    last_completed_stage = stage_row(
+        project_id=project_id,
+        stage_key="dispatch_completed",
+        responsible_dept=Department.DISPATCH.value,
+        status=StageStatus.DONE.value,
+        sort_order=90,
+        due_date=date.today() + timedelta(days=2),
+        completed_at=datetime.now(timezone.utc),
+        completed_by=uuid4(),
+    )
+    connection = ReopenProjectConnection(project_id, last_completed_stage=last_completed_stage)
+    patch_transaction(monkeypatch, projects, connection)
+    audit_calls: list = []
+    patch_audit_actor(monkeypatch, projects, audit_calls)
+
+    async def fake_load_project_detail(_connection, requested_project_id, *args, **kwargs):
+        return {"id": str(requested_project_id), "reopened": True}
+
+    monkeypatch.setattr(projects, "load_project_detail", fake_load_project_detail)
+
+    user = make_user(Department.SALES)
+    result = run_async(
+        projects.reopen_project(
+            project_id,
+            pool=object(),
+            settings=Settings(),
+            user=user,
+        )
+    )
+
+    assert result == {"id": str(project_id), "reopened": True}
+    assert audit_calls == [user.user_id]
+    assert len(connection.execute_calls) == 1
+    assert "UPDATE stages" in connection.execute_calls[0][0]
+    assert connection.execute_calls[0][1] == (last_completed_stage["id"], StageStatus.ACTIVE.value)
+
+
+def test_reopen_project_rejects_non_completed_workflow(monkeypatch) -> None:
+    project_id = uuid4()
+    connection = ReopenProjectConnection(
+        project_id,
+        last_completed_stage=stage_row(
+            project_id=project_id,
+            stage_key="dispatch_completed",
+            responsible_dept=Department.DISPATCH.value,
+            status=StageStatus.DONE.value,
+        ),
+        incomplete_stage={"id": uuid4()},
+    )
+    patch_transaction(monkeypatch, projects, connection)
+    patch_audit_actor(monkeypatch, projects)
+
+    with pytest.raises(HTTPException) as exc:
+        run_async(
+            projects.reopen_project(
+                project_id,
+                pool=object(),
+                settings=Settings(),
+                user=make_user(Department.SALES),
+            )
+        )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "Only fully completed projects can be reopened."
+    assert connection.execute_calls == []
+
+
+def test_reopen_project_rejects_wrong_department(monkeypatch) -> None:
+    project_id = uuid4()
+    connection = ReopenProjectConnection(
+        project_id,
+        last_completed_stage=stage_row(
+            project_id=project_id,
+            stage_key="dispatch_completed",
+            responsible_dept=Department.DISPATCH.value,
+            status=StageStatus.DONE.value,
+        ),
+    )
+    patch_transaction(monkeypatch, projects, connection)
+    patch_audit_actor(monkeypatch, projects)
+
+    with pytest.raises(HTTPException) as exc:
+        run_async(
+            projects.reopen_project(
+                project_id,
+                pool=object(),
+                settings=Settings(),
+                user=make_user(Department.RD),
+            )
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Only Sales, Admin, or the last stage owner can reopen a completed project."
+    assert connection.execute_calls == []
+
+
+def test_reopen_stage_reactivates_selected_stage_and_rewinds_later_progress(monkeypatch) -> None:
+    current = stage_row(
+        responsible_dept=Department.SALES.value,
+        status=StageStatus.DONE.value,
+        sort_order=10,
+        due_date=date.today() + timedelta(days=2),
+        completed_at=datetime.now(timezone.utc),
+        completed_by=uuid4(),
+    )
+    connection = StageWorkflowConnection(current_stage=current)
+    patch_transaction(monkeypatch, stages, connection)
+    audit_calls: list = []
+    patch_audit_actor(monkeypatch, stages, audit_calls)
+
+    async def fake_load_project_detail(_connection, project_id, *args, **kwargs):
+        return {"project_id": str(project_id), "reopened": True}
+
+    monkeypatch.setattr(stages, "load_project_detail", fake_load_project_detail)
+
+    user = make_user(Department.SALES)
+    result = run_async(
+        stages.reopen_stage(
+            current["id"],
+            pool=object(),
+            settings=Settings(),
+            user=user,
+        )
+    )
+
+    assert result == {"project_id": str(current["project_id"]), "reopened": True}
+    assert audit_calls == [user.user_id]
+    assert len(connection.execute_calls) == 3
+    assert "UPDATE stages" in connection.execute_calls[0][0]
+    assert connection.execute_calls[0][1] == (current["id"], StageStatus.ACTIVE.value)
+    assert "sort_order > $2" in connection.execute_calls[1][0]
+    assert connection.execute_calls[1][1] == (current["project_id"], current["sort_order"])
+    assert "UPDATE stage_due_date_change_requests AS r" in connection.execute_calls[2][0]
+    assert connection.execute_calls[2][1] == (current["project_id"], current["sort_order"], user.user_id)
+
+
+def test_reopen_stage_rejects_non_completed_stage(monkeypatch) -> None:
+    current = stage_row(
+        responsible_dept=Department.SALES.value,
+        status=StageStatus.ACTIVE.value,
+    )
+    connection = StageWorkflowConnection(current_stage=current)
+    patch_transaction(monkeypatch, stages, connection)
+    patch_audit_actor(monkeypatch, stages)
+
+    with pytest.raises(HTTPException) as exc:
+        run_async(
+            stages.reopen_stage(
+                current["id"],
+                pool=object(),
+                settings=Settings(),
+                user=make_user(Department.SALES),
+            )
+        )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "Only completed stages can be marked incomplete."
+    assert connection.execute_calls == []
+
+
+def test_reopen_stage_rejects_wrong_department(monkeypatch) -> None:
+    current = stage_row(
+        responsible_dept=Department.DISPATCH.value,
+        status=StageStatus.DONE.value,
+        completed_at=datetime.now(timezone.utc),
+        completed_by=uuid4(),
+    )
+    connection = StageWorkflowConnection(current_stage=current)
+    patch_transaction(monkeypatch, stages, connection)
+    patch_audit_actor(monkeypatch, stages)
+
+    with pytest.raises(HTTPException) as exc:
+        run_async(
+            stages.reopen_stage(
+                current["id"],
+                pool=object(),
+                settings=Settings(),
+                user=make_user(Department.RD),
+            )
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Only Sales, Admin, or the stage owner can mark a completed stage incomplete."
     assert connection.execute_calls == []
 
 
@@ -1561,6 +1889,76 @@ def test_monthly_report_rolls_up_projects_departments_trends_and_audit(monkeypat
     assert "Need final client confirmation" in report_response.audit_events[1].details
 
 
+def test_monthly_report_retries_once_when_connection_drops(monkeypatch) -> None:
+    connection = MonthlyReportConnection()
+
+    class FakePool:
+        def __init__(self) -> None:
+            self.expire_calls = 0
+
+        async def expire_connections(self) -> None:
+            self.expire_calls += 1
+
+    pool = FakePool()
+    attempts = {"count": 0}
+
+    @asynccontextmanager
+    async def flaky_transaction(_pool):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise asyncpg.exceptions.ConnectionDoesNotExistError(
+                "connection was closed in the middle of operation"
+            )
+        yield connection
+
+    monkeypatch.setattr(reports, "transaction", flaky_transaction)
+
+    report_response = run_async(
+        reports.get_monthly_report(
+            month="2026-06",
+            pool=pool,
+            user=make_user(Department.SALES),
+        )
+    )
+
+    assert attempts["count"] == 2
+    assert pool.expire_calls == 1
+    assert report_response.month == "2026-06"
+
+
+def test_monthly_report_returns_503_when_connection_keeps_dropping(monkeypatch) -> None:
+    class FakePool:
+        def __init__(self) -> None:
+            self.expire_calls = 0
+
+        async def expire_connections(self) -> None:
+            self.expire_calls += 1
+
+    pool = FakePool()
+
+    @asynccontextmanager
+    async def broken_transaction(_pool):
+        raise asyncpg.exceptions.ConnectionDoesNotExistError(
+            "connection was closed in the middle of operation"
+        )
+        yield
+
+    monkeypatch.setattr(reports, "transaction", broken_transaction)
+
+    with pytest.raises(HTTPException) as exc:
+        run_async(
+            reports.get_monthly_report(
+                month="2026-06",
+                pool=pool,
+                user=make_user(Department.SALES),
+            )
+        )
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "Database connection was interrupted while generating the report. Please retry."
+    assert pool.expire_calls == 1
+
+
 def test_monthly_report_rejects_non_sales_non_admin_users(monkeypatch) -> None:
     connection = MonthlyReportConnection()
     patch_transaction(monkeypatch, reports, connection)
@@ -1778,6 +2176,39 @@ def test_sales_users_only_receive_revealed_stages_in_project_detail() -> None:
         "costing_shared_rd",
     ]
     assert all(stage.status != StageStatus.PENDING for stage in detail.stages)
+    assert detail.enabled_stage_keys == [
+        "costing_sop_logged",
+        "costing_shared_rd",
+        "sample_development_started_rd",
+    ]
+
+
+def test_disabled_workflow_stages_are_hidden_in_project_detail() -> None:
+    project_id = uuid4()
+    connection = ProjectDetailConnection(project_id)
+    connection.workflow_rows = [
+        setting_row("costing_sop_logged", 10, Department.SALES, 1),
+        setting_row("costing_shared_rd", 20, Department.RD, 3, is_enabled=False),
+        setting_row("sample_development_started_rd", 30, Department.RD, 2),
+    ]
+
+    detail = run_async(
+        projects.load_project_detail(
+            connection,
+            project_id,
+            viewer_department=Department.SALES,
+            include_pending=True,
+        )
+    )
+
+    assert detail.enabled_stage_keys == [
+        "costing_sop_logged",
+        "sample_development_started_rd",
+    ]
+    assert [stage.stage_key for stage in detail.stages] == [
+        "costing_sop_logged",
+        "sample_development_started_rd",
+    ]
 
 
 def test_delete_project_cleans_up_audit_rows_and_storage_objects(monkeypatch) -> None:
@@ -1862,14 +2293,17 @@ def test_update_project_metadata_persists_optional_values(monkeypatch) -> None:
 
     assert result == {"id": str(project_id), "updated": True}
     assert audit_calls == [user.user_id]
-    assert len(connection.fetchrow_calls) == 1
-    assert "UPDATE projects" in connection.fetchrow_calls[0][0]
-    assert connection.fetchrow_calls[0][1] == (
+    assert len(connection.fetchrow_calls) == 2
+    assert "UPDATE projects" in connection.fetchrow_calls[1][0]
+    assert connection.fetchrow_calls[1][1] == (
         project_id,
+        "Current Project",
+        "Current Client",
         "Nirvaan",
         ProjectPriority.ACCELERATED.value,
         18,
         225000.0,
+        None,
         32,
         "Fast-track sample approval.",
     )
@@ -1888,7 +2322,15 @@ def test_workflow_settings_update_requires_every_stage_key(monkeypatch) -> None:
     async def fake_fetch_workflow_settings_rows(_connection):
         return initial_rows
 
+    async def fake_sync_pending_stages_with_workflow_settings(*_args, **_kwargs):
+        return None
+
     monkeypatch.setattr(workflow_settings, "fetch_workflow_settings_rows", fake_fetch_workflow_settings_rows)
+    monkeypatch.setattr(
+        workflow_settings,
+        "sync_pending_stages_with_workflow_settings",
+        fake_sync_pending_stages_with_workflow_settings,
+    )
 
     payload = WorkflowStageSettingUpdateRequest(
         settings=[
@@ -1918,6 +2360,7 @@ def test_workflow_settings_update_rewrites_pending_stage_templates(monkeypatch) 
     connection = WorkflowSettingsConnection()
     patch_transaction(monkeypatch, workflow_settings, connection)
     audit_calls: list = []
+    sync_calls: list[object] = []
     patch_audit_actor(monkeypatch, workflow_settings, audit_calls)
 
     initial_rows = [
@@ -1934,18 +2377,29 @@ def test_workflow_settings_update_rewrites_pending_stage_templates(monkeypatch) 
         calls["count"] += 1
         return initial_rows if calls["count"] == 1 else updated_rows
 
+    async def fake_sync_pending_stages_with_workflow_settings(*_args, **_kwargs):
+        sync_calls.append(_args[0] if _args else None)
+        return None
+
     monkeypatch.setattr(workflow_settings, "fetch_workflow_settings_rows", fake_fetch_workflow_settings_rows)
+    monkeypatch.setattr(
+        workflow_settings,
+        "sync_pending_stages_with_workflow_settings",
+        fake_sync_pending_stages_with_workflow_settings,
+    )
 
     payload = WorkflowStageSettingUpdateRequest(
         settings=[
             WorkflowStageSettingUpdate(
                 stage_key="stage_a",
                 responsible_dept=Department.ADMIN,
+                is_enabled=True,
                 default_due_days=4,
             ),
             WorkflowStageSettingUpdate(
                 stage_key="stage_b",
                 responsible_dept=Department.RD,
+                is_enabled=True,
                 default_due_days=2,
             ),
         ]
@@ -1961,12 +2415,71 @@ def test_workflow_settings_update_rewrites_pending_stage_templates(monkeypatch) 
 
     assert len(connection.executemany_calls) == 1
     assert connection.executemany_calls[0][1] == [
-        ("stage_a", Department.ADMIN.value, 4),
-        ("stage_b", Department.RD.value, 2),
+        ("stage_a", Department.ADMIN.value, True, 4),
+        ("stage_b", Department.RD.value, True, 2),
     ]
-    assert len(connection.execute_calls) == 1
-    assert "UPDATE stages AS s" in connection.execute_calls[0][0]
+    assert sync_calls == [connection]
     assert [row.stage_key for row in result] == ["stage_a", "stage_b"]
     assert result[0].responsible_dept == Department.ADMIN
+    assert result[0].is_enabled is True
     assert result[0].default_due_days == 4
     assert audit_calls and audit_calls[0] is not None
+
+
+def test_workflow_settings_update_persists_disabled_stage(monkeypatch) -> None:
+    connection = WorkflowSettingsConnection()
+    patch_transaction(monkeypatch, workflow_settings, connection)
+    patch_audit_actor(monkeypatch, workflow_settings)
+
+    async def fake_sync_pending_stages_with_workflow_settings(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        workflow_settings,
+        "sync_pending_stages_with_workflow_settings",
+        fake_sync_pending_stages_with_workflow_settings,
+    )
+
+    payload = WorkflowStageSettingUpdateRequest(
+        settings=[
+            WorkflowStageSettingUpdate(
+                stage_key="costing_sop_logged",
+                responsible_dept=Department.SALES,
+                is_enabled=False,
+                default_due_days=1,
+            ),
+            WorkflowStageSettingUpdate(
+                stage_key="costing_shared_rd",
+                responsible_dept=Department.RD,
+                is_enabled=True,
+                default_due_days=3,
+            ),
+            WorkflowStageSettingUpdate(
+                stage_key="sample_development_started_rd",
+                responsible_dept=Department.RD,
+                is_enabled=True,
+                default_due_days=2,
+            ),
+        ]
+    )
+
+    result = run_async(
+        workflow_settings.update_workflow_settings(
+            payload,
+            pool=object(),
+            user=make_user(Department.ADMIN),
+        )
+    )
+
+    update_call = next(
+        call for call in connection.executemany_calls if "UPDATE workflow_stage_settings" in call[0]
+    )
+
+    assert update_call[1][0] == (
+        "costing_sop_logged",
+        Department.SALES.value,
+        False,
+        1,
+    )
+    assert result[0].stage_key == "costing_sop_logged"
+    assert result[0].is_enabled is False

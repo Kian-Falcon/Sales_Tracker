@@ -4,6 +4,7 @@ import logging
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from io import StringIO
+from time import perf_counter
 from uuid import UUID
 
 from asyncpg import UniqueViolationError
@@ -18,6 +19,7 @@ from models.common import CurrentUser, Department, ProjectDocumentType, StageSna
 from models.project import ProjectCreate, ProjectDetail, ProjectDocumentRead, ProjectSummary, ProjectUpdate
 from models.profile import MentionableProfileRead
 from models.stage import StageDueDateChangeRequestRead, StageRead
+from observability import log_endpoint_timing
 from services.storage import (
     StorageServiceError,
     build_project_document_path,
@@ -27,7 +29,6 @@ from services.storage import (
     upload_storage_object,
 )
 from services.notification import NotificationService
-from services.airtable_sync import delete_project_tree, sync_project_tree
 from services.workflow_settings import load_stage_blueprint
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
@@ -90,6 +91,13 @@ def _eta_label(current_stage_due_date: date | None, current_stage_status: str | 
         return "Due today"
 
     return f"{diff_days}d left"
+
+
+def _reopened_stage_status(due_date: date | None) -> str:
+    if due_date is not None and due_date < date.today():
+        return "overdue"
+
+    return "active"
 
 
 def _format_pending_duration(start_value: datetime | None, end_value: datetime | None = None) -> str:
@@ -288,6 +296,7 @@ def _build_project_detail(
     comment_rows: list[dict],
     due_date_request_rows: list[dict],
     documents: list[ProjectDocumentRead] | None = None,
+    enabled_stage_keys: list[str] | None = None,
 ) -> ProjectDetail:
     comments_by_stage: dict[UUID, list[CommentRead]] = defaultdict(list)
     for comment in comment_rows:
@@ -305,7 +314,12 @@ def _build_project_detail(
         )
         for stage in stage_rows
     ]
-    return ProjectDetail(**project, stages=stages, documents=documents or [])
+    return ProjectDetail(
+        **project,
+        enabled_stage_keys=enabled_stage_keys or [],
+        stages=stages,
+        documents=documents or [],
+    )
 
 
 async def load_project_detail(
@@ -316,6 +330,9 @@ async def load_project_detail(
     include_pending: bool = False,
 ) -> ProjectDetail:
     """Load a full project detail (project + ordered stages + comments + documents)."""
+    enabled_stage_keys = [template.stage_key for template in await load_stage_blueprint(connection)]
+    enabled_stage_key_set = set(enabled_stage_keys)
+
     project_row = await connection.fetchrow(
         """
         SELECT
@@ -334,6 +351,11 @@ async def load_project_detail(
     stage_rows = records_to_dicts(
         await connection.fetch("SELECT * FROM stages WHERE project_id = $1 ORDER BY sort_order", project_id)
     )
+    stage_rows = [
+        stage
+        for stage in stage_rows
+        if stage["stage_key"] in enabled_stage_key_set
+    ]
     if viewer_department not in {None, Department.SALES, Department.ADMIN}:
         stage_rows = [
             stage
@@ -403,6 +425,7 @@ async def load_project_detail(
         comment_rows,
         due_date_request_rows,
         documents,
+        enabled_stage_keys=enabled_stage_keys,
     )
 
 
@@ -411,80 +434,106 @@ async def list_projects(
     pool=Depends(get_pool),
     user: CurrentUser = Depends(get_current_user),
 ) -> list[ProjectSummary]:
-    rows = await pool.fetch(
-        """
-        SELECT
-            p.*,
-            s.id AS current_stage_id,
-            s.stage_key AS current_stage_key,
-            s.name AS current_stage_name,
-            s.phase AS current_stage_phase,
-            s.responsible_dept AS current_stage_dept,
-            s.status AS current_stage_status,
-            s.sort_order AS current_stage_sort_order,
-            s.activated_at AS current_stage_activated_at,
-            s.due_date AS current_stage_due_date,
-            stage_counts.completed_stages,
-            stage_counts.total_stages
-        FROM projects p
-        LEFT JOIN LATERAL (
-            SELECT *
-            FROM stages
-            WHERE project_id = p.id
-              AND status IN ('active', 'overdue')
-            ORDER BY sort_order
-            LIMIT 1
-        ) s ON TRUE
-        LEFT JOIN LATERAL (
+    started_at = perf_counter()
+    status_label = "ok"
+    project_count = 0
+
+    try:
+        enabled_stage_keys = [template.stage_key for template in await load_stage_blueprint(pool)]
+        rows = await pool.fetch(
+            """
             SELECT
-                COUNT(*) FILTER (WHERE status = 'done') AS completed_stages,
-                COUNT(*) AS total_stages
-            FROM stages
-            WHERE project_id = p.id
-        ) stage_counts ON TRUE
-        WHERE p.is_archived = FALSE
-        ORDER BY p.created_at DESC
-        """
-    )
-
-    results: list[ProjectSummary] = []
-    for row in records_to_dicts(rows):
-        normalized = _normalize_project_row(row)
-        snapshot = None
-        if normalized["current_stage_id"]:
-            snapshot = StageSnapshot(
-                id=normalized["current_stage_id"],
-                name=normalized["current_stage_name"],
-                phase=normalized["current_stage_phase"],
-                responsible_dept=normalized["current_stage_dept"],
-                status=normalized["current_stage_status"],
-                stage_key=normalized["current_stage_key"],
-                sort_order=normalized["current_stage_sort_order"],
-                activated_at=normalized["current_stage_activated_at"],
-                due_date=normalized["current_stage_due_date"],
-            )
-
-        results.append(
-            ProjectSummary(
-                id=normalized["id"],
-                project_code=normalized["project_code"],
-                name=normalized["name"],
-                client=normalized["client"],
-                brand=normalized["brand"],
-                assigned_person_name=normalized.get("assigned_person_name"),
-                priority=normalized["priority"],
-                estimated_tat_days=normalized["estimated_tat_days"],
-                total_order_value=normalized["total_order_value"],
-                number_of_stores=normalized["number_of_stores"],
-                completed_stages=normalized.get("completed_stages") or 0,
-                total_stages=normalized.get("total_stages") or 0,
-                created_at=normalized["created_at"],
-                is_archived=normalized["is_archived"],
-                current_stage=snapshot,
-            )
+                p.*,
+                s.id AS current_stage_id,
+                s.stage_key AS current_stage_key,
+                s.name AS current_stage_name,
+                s.phase AS current_stage_phase,
+                s.responsible_dept AS current_stage_dept,
+                s.status AS current_stage_status,
+                s.sort_order AS current_stage_sort_order,
+                s.activated_at AS current_stage_activated_at,
+                s.due_date AS current_stage_due_date,
+                stage_counts.completed_stages,
+                stage_counts.total_stages
+            FROM projects p
+            LEFT JOIN LATERAL (
+                SELECT *
+                FROM stages
+                WHERE project_id = p.id
+                  AND stage_key = ANY($1::text[])
+                  AND status IN ('active', 'overdue')
+                ORDER BY sort_order
+                LIMIT 1
+            ) s ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT
+                    COUNT(*) FILTER (WHERE status = 'done') AS completed_stages,
+                    COUNT(*) AS total_stages
+                FROM stages
+                WHERE project_id = p.id
+                  AND stage_key = ANY($1::text[])
+            ) stage_counts ON TRUE
+            WHERE p.is_archived = FALSE
+            ORDER BY p.created_at DESC
+            """,
+            enabled_stage_keys,
         )
 
-    return results
+        results: list[ProjectSummary] = []
+        for row in records_to_dicts(rows):
+            normalized = _normalize_project_row(row)
+            snapshot = None
+            if normalized["current_stage_id"]:
+                snapshot = StageSnapshot(
+                    id=normalized["current_stage_id"],
+                    name=normalized["current_stage_name"],
+                    phase=normalized["current_stage_phase"],
+                    responsible_dept=normalized["current_stage_dept"],
+                    status=normalized["current_stage_status"],
+                    stage_key=normalized["current_stage_key"],
+                    sort_order=normalized["current_stage_sort_order"],
+                    activated_at=normalized["current_stage_activated_at"],
+                    due_date=normalized["current_stage_due_date"],
+                )
+
+            results.append(
+                ProjectSummary(
+                    id=normalized["id"],
+                    project_code=normalized["project_code"],
+                    name=normalized["name"],
+                    client=normalized["client"],
+                    brand=normalized["brand"],
+                    assigned_person_name=normalized.get("assigned_person_name"),
+                    priority=normalized["priority"],
+                    estimated_tat_days=normalized["estimated_tat_days"],
+                    total_order_value=normalized["total_order_value"],
+                    dispatch_date=normalized.get("dispatch_date"),
+                    number_of_stores=normalized["number_of_stores"],
+                    completed_stages=normalized.get("completed_stages") or 0,
+                    total_stages=normalized.get("total_stages") or 0,
+                    created_at=normalized["created_at"],
+                    is_archived=normalized["is_archived"],
+                    current_stage=snapshot,
+                )
+            )
+
+        project_count = len(results)
+        return results
+    except HTTPException as exc:
+        status_label = f"http_{exc.status_code}"
+        raise
+    except Exception:
+        status_label = "error"
+        raise
+    finally:
+        log_endpoint_timing(
+            logger,
+            "projects.list",
+            started_at,
+            status=status_label,
+            viewer_department=user.department.value,
+            project_count=project_count,
+        )
 
 
 @router.post("", response_model=ProjectDetail, status_code=status.HTTP_201_CREATED)
@@ -527,11 +576,12 @@ async def create_project(
                     priority,
                     estimated_tat_days,
                     total_order_value,
+                    dispatch_date,
                     number_of_stores,
                     special_request,
                     created_by
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 RETURNING *
                 """,
                 payload.name,
@@ -543,6 +593,7 @@ async def create_project(
                 payload.priority.value,
                 payload.estimated_tat_days,
                 payload.total_order_value,
+                payload.dispatch_date,
                 payload.number_of_stores,
                 payload.special_request.strip() if payload.special_request else None,
                 user.user_id,
@@ -626,6 +677,7 @@ async def create_project(
             "created_by_department": creator_department.value,
             "estimated_tat_days": project_dict["estimated_tat_days"],
             "total_order_value": project_dict["total_order_value"],
+            "dispatch_date": project_dict.get("dispatch_date"),
             "special_request": project_dict.get("special_request"),
             "current_stage_name": first_stage_name,
             "recipients": recipients,
@@ -636,12 +688,14 @@ async def create_project(
         else:
             await _send_project_created_summary_task(settings, notification_payload)
 
-    if background_tasks is not None:
-        background_tasks.add_task(sync_project_tree, pool, settings, project["id"])
-    else:
-        await sync_project_tree(pool, settings, project["id"])
-
-    return _build_project_detail(project_dict, stage_rows, [], [], [])
+    return _build_project_detail(
+        project_dict,
+        stage_rows,
+        [],
+        [],
+        [],
+        enabled_stage_keys=[template.stage_key for template in stage_blueprint],
+    )
 
 
 @router.get("/meta/mentionable-users", response_model=list[MentionableProfileRead])
@@ -717,6 +771,11 @@ async def update_project_metadata(
             if "total_order_value" in provided_fields
             else current_project_dict["total_order_value"]
         )
+        dispatch_date = (
+            payload.dispatch_date
+            if "dispatch_date" in provided_fields
+            else current_project_dict["dispatch_date"]
+        )
         number_of_stores = (
             payload.number_of_stores
             if "number_of_stores" in provided_fields
@@ -734,8 +793,9 @@ async def update_project_metadata(
                 priority = $5,
                 estimated_tat_days = $6,
                 total_order_value = $7,
-                number_of_stores = $8,
-                special_request = $9
+                dispatch_date = $8,
+                number_of_stores = $9,
+                special_request = $10
             WHERE id = $1
               AND is_archived = FALSE
             RETURNING id
@@ -747,6 +807,7 @@ async def update_project_metadata(
             priority,
             estimated_tat_days,
             total_order_value,
+            dispatch_date,
             number_of_stores,
             special_request,
         )
@@ -758,10 +819,99 @@ async def update_project_metadata(
             viewer_department=user.department,
         )
 
-    if background_tasks is not None:
-        background_tasks.add_task(sync_project_tree, pool, settings, project_id)
-    else:
-        await sync_project_tree(pool, settings, project_id)
+    return detail
+
+
+@router.patch("/{project_id}/reopen", response_model=ProjectDetail)
+async def reopen_project(
+    project_id: UUID,
+    background_tasks: BackgroundTasks = None,
+    pool=Depends(get_pool),
+    settings: Settings = Depends(get_settings),
+    user: CurrentUser = Depends(get_current_user),
+) -> ProjectDetail:
+    async with transaction(pool) as connection:
+        project = await connection.fetchrow(
+            """
+            SELECT id
+            FROM projects
+            WHERE id = $1
+              AND is_archived = FALSE
+            """,
+            project_id,
+        )
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+
+        incomplete_stage = await connection.fetchrow(
+            """
+            SELECT id
+            FROM stages
+            WHERE project_id = $1
+              AND status <> 'done'
+            LIMIT 1
+            """,
+            project_id,
+        )
+        if incomplete_stage is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Only fully completed projects can be reopened.",
+            )
+
+        last_completed_stage = await connection.fetchrow(
+            """
+            SELECT *
+            FROM stages
+            WHERE project_id = $1
+              AND status = 'done'
+            ORDER BY sort_order DESC, completed_at DESC NULLS LAST
+            LIMIT 1
+            """,
+            project_id,
+        )
+        if last_completed_stage is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This project has no completed stage to reopen.",
+            )
+
+        allowed_departments = {
+            Department.SALES.value,
+            Department.ADMIN.value,
+            last_completed_stage["responsible_dept"],
+        }
+        if user.department.value not in allowed_departments:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only Sales, Admin, or the last stage owner can reopen a completed project.",
+            )
+
+        await set_audit_actor(
+            connection,
+            user.user_id,
+            department=user.department.value,
+            jwt_department=Department.ADMIN.value,
+        )
+        await connection.execute(
+            """
+            UPDATE stages
+            SET status = $2,
+                activated_at = NOW(),
+                completed_at = NULL,
+                completed_by = NULL
+            WHERE id = $1
+            """,
+            last_completed_stage["id"],
+            _reopened_stage_status(last_completed_stage["due_date"]),
+        )
+
+        detail = await load_project_detail(
+            connection,
+            project_id,
+            settings=settings,
+            viewer_department=user.department,
+        )
 
     return detail
 
@@ -928,11 +1078,6 @@ async def upload_project_document(
         else:
             await _send_costing_boq_uploaded_task(settings, costing_boq_notification_payload)
 
-    if background_tasks is not None:
-        background_tasks.add_task(sync_project_tree, pool, settings, project_id)
-    else:
-        await sync_project_tree(pool, settings, project_id)
-
     return ProjectDocumentRead(**inserted_row, download_url=download_url)
 
 
@@ -943,12 +1088,31 @@ async def get_project(
     settings: Settings = Depends(get_settings),
     user: CurrentUser = Depends(get_current_user),
 ) -> ProjectDetail:
-    return await load_project_detail(
-        pool,
-        project_id,
-        settings=settings,
-        viewer_department=user.department,
-    )
+    started_at = perf_counter()
+    status_label = "ok"
+
+    try:
+        return await load_project_detail(
+            pool,
+            project_id,
+            settings=settings,
+            viewer_department=user.department,
+        )
+    except HTTPException as exc:
+        status_label = f"http_{exc.status_code}"
+        raise
+    except Exception:
+        status_label = "error"
+        raise
+    finally:
+        log_endpoint_timing(
+            logger,
+            "projects.detail",
+            started_at,
+            status=status_label,
+            project_id=project_id,
+            viewer_department=user.department.value,
+        )
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1030,11 +1194,6 @@ async def delete_project(
                 len(cleanup_errors),
             )
 
-    if background_tasks is not None:
-        background_tasks.add_task(delete_project_tree, settings, project_id)
-    else:
-        await delete_project_tree(settings, project_id)
-
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1056,6 +1215,7 @@ async def export_projects_csv(
             p.priority,
             p.estimated_tat_days,
             p.total_order_value,
+            p.dispatch_date,
             p.number_of_stores,
             p.created_at,
             s.name AS current_stage_name,
@@ -1110,6 +1270,7 @@ async def export_projects_csv(
             "Completion %",
             "Estimated TAT (Days)",
             "Order Value (INR)",
+            "Dispatch Date",
             "Activated On",
             "Created On",
             "Project Link",
@@ -1142,6 +1303,7 @@ async def export_projects_csv(
                 _format_csv_completion_rate(normalized.get("completed_stages"), normalized.get("total_stages")),
                 normalized["estimated_tat_days"] or "Not set",
                 _format_csv_currency(normalized["total_order_value"]),
+                _format_csv_date(normalized.get("dispatch_date")),
                 _format_csv_datetime(normalized["current_stage_activated_at"], empty_label="-"),
                 _format_csv_datetime(normalized["created_at"]),
                 project_url,

@@ -41,14 +41,6 @@ class Settings(BaseSettings):
     email_from_name: str = "Workflow Tracker"
     frontend_url: str = "http://localhost:3000"
     enable_scheduler: bool = False
-    airtable_access_token: str | None = None
-    airtable_base_id: str | None = None
-    airtable_projects_table: str = "Projects"
-    airtable_stages_table: str = "Stages"
-    airtable_comments_table: str = "Comments"
-    airtable_due_date_requests_table: str = "Due Date Requests"
-    airtable_workflow_settings_table: str = "Workflow Settings"
-    airtable_request_timeout_seconds: int = 20
 
     # Stored as raw strings rather than ``list[str]`` so comma-separated env
     # values parse identically across pydantic-settings versions: list-typed
@@ -73,10 +65,6 @@ class Settings(BaseSettings):
     @property
     def email_from(self) -> str:
         return f"{self.email_from_name} <{self.email_from_address}>"
-
-    @property
-    def airtable_sync_enabled(self) -> bool:
-        return bool(self.airtable_access_token and self.airtable_base_id)
 
 
 @lru_cache

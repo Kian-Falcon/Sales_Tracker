@@ -268,7 +268,6 @@ export function UserSidebar({
           }
 
           router.replace("/login");
-          router.refresh();
         } catch (caughtError) {
           setError(caughtError instanceof Error ? caughtError.message : "Unable to sign out.");
         }
