@@ -658,9 +658,11 @@ export function StageRow({
               {latestCostingBoq ? (
                 <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-ink/75">
                   <div className="font-semibold text-ink">{latestCostingBoq.file_name}</div>
-                  <div className="mt-1 text-xs text-ink/50">
-                    Uploaded {formatDateTime(latestCostingBoq.created_at)}
-                    {latestCostingBoq.uploaded_by_name ? ` by ${latestCostingBoq.uploaded_by_name}` : ""}
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink/55">
+                    <span className="rounded-full border border-ink/10 bg-surface-muted/35 px-3 py-1 font-semibold text-ink/70">
+                      Time stamped {formatDateTime(latestCostingBoq.created_at)}
+                    </span>
+                    {latestCostingBoq.uploaded_by_name ? <span>Uploaded by {latestCostingBoq.uploaded_by_name}</span> : null}
                   </div>
                 </div>
               ) : null}

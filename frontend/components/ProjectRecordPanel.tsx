@@ -8,7 +8,7 @@ import { ProjectOverviewPanel } from "@/components/ProjectOverviewPanel";
 import { Skeleton } from "@/components/Skeleton";
 import { StatusChip } from "@/components/StatusChip";
 import type { Department, ProjectDetail, ProjectDocument } from "@/lib/types";
-import { formatDate, formatPriority } from "@/lib/utils";
+import { formatDate, formatPriority, formatProjectKind } from "@/lib/utils";
 
 export type ProjectPanelTab = "overview" | "pipeline" | "documents";
 
@@ -115,6 +115,9 @@ export function ProjectRecordPanel({
                         }`}
                       >
                         {formatPriority(panelProject.priority)}
+                      </span>
+                      <span className="rounded-full bg-surface-muted px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink/65">
+                        {formatProjectKind(panelProject.project_kind)}
                       </span>
                       {liveStage ? <StatusChip status={liveStage.status} /> : null}
                     </div>

@@ -36,6 +36,10 @@ Run these files in Supabase SQL Editor, top to bottom:
 17. `017_allow_project_cleanup_comment_delete.sql`
 18. `018_costing_boq_document_type.sql`
 19. `019_project_dispatch_date.sql`
+20. `020_performance_indexes.sql`
+21. `021_workflow_stage_enablement.sql`
+22. `022_project_fresh_costing.sql`
+23. `023_project_kind.sql`
 
 ## What The Migrations Create
 
@@ -55,6 +59,10 @@ Run these files in Supabase SQL Editor, top to bottom:
 - a safer comment lock trigger that still blocks normal edits/deletes but allows backend-managed project cleanup
 - a dedicated `costing_boq` document type so R&D can upload the finalized costing file and Sales/Admin can track that handoff
 - an optional planned `dispatch_date` on each project for commercial planning and downstream reporting
+- targeted performance indexes for the dashboard, project detail, and reporting queries
+- workflow-stage enablement controls so Admin can disable unused stages from the shared pipeline
+- a per-project `requires_fresh_costing` flag so singular jobs can skip the costing phase and begin from drawing
+- a `project_kind` field so teams can classify work as standard `project` or `recurring` and filter the dashboard accordingly
 - RLS policies for authenticated reads and service-role writes
 
 ## After Running Migrations

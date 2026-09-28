@@ -4,12 +4,14 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition, type ChangeEvent, type FormEvent } from "react";
 
 import { createProject, listProjectMentionableUsers, uploadProjectDocument } from "@/lib/api";
-import type { MentionableUser, ProjectPriority, ViewerDetails } from "@/lib/types";
+import type { MentionableUser, ProjectKind, ProjectPriority, ViewerDetails } from "@/lib/types";
 
 type FormState = {
   name: string;
   client: string;
+  project_kind: ProjectKind;
   assigned_person_name: string;
+  requires_fresh_costing: boolean;
   priority: ProjectPriority;
   estimated_tat_days: string;
   total_order_value: string;
@@ -29,7 +31,9 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
   const [form, setForm] = useState<FormState>({
     name: "",
     client: "",
+    project_kind: "project",
     assigned_person_name: viewer?.fullName ?? "",
+    requires_fresh_costing: true,
     priority: "normal",
     estimated_tat_days: "",
     total_order_value: "",
@@ -143,8 +147,10 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
           const project = await createProject({
             name: form.name.trim(),
             client: form.client.trim(),
+            project_kind: form.project_kind,
             assigned_person_name: form.assigned_person_name.trim(),
             assigned_person_email: selectedAssignee?.email,
+            requires_fresh_costing: form.requires_fresh_costing,
             priority: form.priority,
             estimated_tat_days: Number(form.estimated_tat_days),
             total_order_value: Number(form.total_order_value),
@@ -197,6 +203,20 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
           onChange={(value) => updateField("client", value)}
           placeholder="Acme Retail"
         />
+        <label className="block space-y-2">
+          <span className="text-sm font-medium text-ink/70">Project type</span>
+          <select
+            value={form.project_kind}
+            onChange={(event) => updateField("project_kind", event.target.value as ProjectKind)}
+            className="w-full rounded-2xl border border-ink/10 bg-surface-muted/50 px-4 py-3 text-sm outline-none transition focus:border-accent"
+          >
+            <option value="project">Project</option>
+            <option value="recurring">Recurring</option>
+          </select>
+          <p className="text-xs text-ink/50">
+            Use `Recurring` for repeat jobs so the dashboard can filter them separately from one-off projects.
+          </p>
+        </label>
         <label className="block space-y-2">
           <span className="text-sm font-medium text-ink/70">Assigned person</span>
           <input
@@ -253,6 +273,21 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
               <span className="text-warning">No teammate selected yet. Only Sales/Admin will receive the email.</span>
             ) : null}
           </div>
+        </label>
+
+        <label className="block space-y-2">
+          <span className="text-sm font-medium text-ink/70">Fresh costing SOP required?</span>
+          <select
+            value={form.requires_fresh_costing ? "yes" : "no"}
+            onChange={(event) => updateField("requires_fresh_costing", event.target.value === "yes")}
+            className="w-full rounded-2xl border border-ink/10 bg-surface-muted/50 px-4 py-3 text-sm outline-none transition focus:border-accent"
+          >
+            <option value="yes">Yes, include fresh costing</option>
+            <option value="no">No, skip costing and start from drawing</option>
+          </select>
+          <p className="text-xs text-ink/50">
+            Choose `No` for singular projects that do not need a fresh costing SOP from R&D.
+          </p>
         </label>
 
         <label className="block space-y-2">

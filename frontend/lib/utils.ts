@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 
-import type { ProjectPriority, StagePhase } from "@/lib/types";
+import type { ProjectKind, ProjectPriority, StagePhase } from "@/lib/types";
 
 export function cn(...inputs: ClassValue[]) {
   return clsx(...inputs);
@@ -118,6 +118,10 @@ export function formatFileSize(bytes: number | null | undefined) {
 
 export function formatPriority(priority: ProjectPriority) {
   return priority === "accelerated" ? "Accelerated" : "Normal";
+}
+
+export function formatProjectKind(projectKind: ProjectKind) {
+  return projectKind === "recurring" ? "Recurring" : "Project";
 }
 
 export const phaseOrder: StagePhase[] = ["costing", "drawing", "sampling", "production"];

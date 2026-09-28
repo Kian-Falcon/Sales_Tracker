@@ -3,12 +3,13 @@ import { useEffect, useState, useTransition, type FormEvent } from "react";
 
 import { useToast } from "@/components/ToastProvider";
 import { updateProjectMetadata } from "@/lib/api";
-import type { Department, ProjectDetail, ProjectPriority } from "@/lib/types";
-import { formatCurrency, formatDate, formatPriority } from "@/lib/utils";
+import type { Department, ProjectDetail, ProjectKind, ProjectPriority } from "@/lib/types";
+import { formatCurrency, formatDate, formatPriority, formatProjectKind } from "@/lib/utils";
 
 type FormState = {
   name: string;
   client: string;
+  project_kind: ProjectKind;
   assigned_person_name: string;
   priority: ProjectPriority;
   estimated_tat_days: string;
@@ -21,6 +22,7 @@ function buildFormState(project: ProjectDetail): FormState {
   return {
     name: project.name,
     client: project.client,
+    project_kind: project.project_kind,
     assigned_person_name: project.assigned_person_name ?? "",
     priority: project.priority,
     estimated_tat_days:
@@ -95,6 +97,7 @@ export function ProjectOverviewPanel({
           const updatedProject = await updateProjectMetadata(project.id, {
             name: form.name.trim(),
             client: form.client.trim(),
+            project_kind: form.project_kind,
             assigned_person_name: form.assigned_person_name.trim(),
             priority: form.priority,
             estimated_tat_days: form.estimated_tat_days ? Number(form.estimated_tat_days) : null,
@@ -157,6 +160,7 @@ export function ProjectOverviewPanel({
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <DetailCard label="Project name" value={project.name} />
           <DetailCard label="Client" value={project.client} />
+          <DetailCard label="Project type" value={formatProjectKind(project.project_kind)} />
           <DetailCard label="Assigned person" value={project.assigned_person_name ?? "Unassigned"} />
           <DetailCard label="Priority" value={formatPriority(project.priority)} />
           <DetailCard
@@ -174,6 +178,11 @@ export function ProjectOverviewPanel({
             value={project.dispatch_date ? formatDate(project.dispatch_date) : "Not set"}
             muted={!project.dispatch_date}
           />
+          <DetailCard
+            label="Fresh costing SOP"
+            value={project.requires_fresh_costing ? "Required" : "Not required"}
+            muted={!project.requires_fresh_costing}
+          />
           <DetailCard label="Created by" value={project.created_by_name ?? "Workflow user"} />
           <DetailCard
             label="Department"
@@ -189,6 +198,16 @@ export function ProjectOverviewPanel({
             {project.special_request?.trim() ? project.special_request : "No special request has been recorded."}
           </p>
         </div>
+
+        {!project.requires_fresh_costing ? (
+          <div className="rounded-[24px] border border-border bg-surface-muted/30 px-4 py-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Workflow note</p>
+            <p className="mt-2 text-sm leading-6 text-ink/75">
+              This project was created without a fresh costing SOP requirement, so the costing phase was skipped and
+              the workflow started from drawing.
+            </p>
+          </div>
+        ) : null}
 
         {canEdit && editorOpen ? (
           <form onSubmit={handleSubmit} className="rounded-[24px] border border-border bg-surface-muted/20 p-5 shadow-sm">
@@ -214,6 +233,17 @@ export function ProjectOverviewPanel({
                 onChange={(value) => updateField("client", value)}
                 placeholder="Acme Retail"
               />
+              <label className="block space-y-2">
+                <span className="text-sm font-medium text-ink/70">Project type</span>
+                <select
+                  value={form.project_kind}
+                  onChange={(event) => updateField("project_kind", event.target.value as ProjectKind)}
+                  className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm outline-none transition focus:border-accent"
+                >
+                  <option value="project">Project</option>
+                  <option value="recurring">Recurring</option>
+                </select>
+              </label>
               <Field
                 label="Assigned person"
                 value={form.assigned_person_name}

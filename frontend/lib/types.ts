@@ -8,6 +8,7 @@ export type Department =
   | "Admin";
 
 export type ProjectPriority = "normal" | "accelerated";
+export type ProjectKind = "project" | "recurring";
 export type ProjectDocumentType = "boq" | "costing_boq" | "attachment";
 export type WorkspaceProjectStatusFilter = "all" | "active" | "overdue" | "done";
 export type WorkspaceProjectSortMode = "created-desc" | "created-asc" | "due-asc" | "priority" | "value-desc";
@@ -93,6 +94,7 @@ export interface ProjectSummary {
   name: string;
   client: string;
   brand: string | null;
+  project_kind: ProjectKind;
   assigned_person_name: string | null;
   priority: ProjectPriority;
   estimated_tat_days: number | null;
@@ -141,6 +143,7 @@ export interface ProjectWorkspacePage {
 export interface ProjectWorkspaceQuery {
   search?: string;
   client?: string;
+  project_kind?: ProjectKind;
   status?: WorkspaceProjectStatusFilter;
   department?: Department;
   overdue_only?: boolean;
@@ -171,6 +174,7 @@ export interface ProjectDetail {
   name: string;
   client: string;
   brand: string | null;
+  project_kind: ProjectKind;
   assigned_person_name: string | null;
   priority: ProjectPriority;
   estimated_tat_days: number | null;
@@ -183,6 +187,7 @@ export interface ProjectDetail {
   created_by_department: Department | null;
   created_at: string;
   is_archived: boolean;
+  requires_fresh_costing: boolean;
   enabled_stage_keys: string[];
   documents: ProjectDocument[];
   stages: Stage[];
@@ -278,8 +283,10 @@ export interface MonthlyReport {
 export interface ProjectCreateInput {
   name: string;
   client: string;
+  project_kind: ProjectKind;
   assigned_person_name: string;
   assigned_person_email?: string;
+  requires_fresh_costing: boolean;
   priority: ProjectPriority;
   estimated_tat_days: number;
   total_order_value: number;
@@ -290,6 +297,7 @@ export interface ProjectCreateInput {
 export interface ProjectMetadataUpdateInput {
   name?: string;
   client?: string;
+  project_kind?: ProjectKind;
   assigned_person_name?: string;
   priority?: ProjectPriority;
   estimated_tat_days?: number | null;

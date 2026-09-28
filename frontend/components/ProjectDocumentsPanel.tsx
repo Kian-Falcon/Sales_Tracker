@@ -1,5 +1,5 @@
 "use client";
-import { useState, useTransition, type ChangeEvent } from "react";
+import { useMemo, useState, useTransition, type ChangeEvent } from "react";
 
 import { useToast } from "@/components/ToastProvider";
 import { uploadProjectDocument } from "@/lib/api";
@@ -26,6 +26,15 @@ export function ProjectDocumentsPanel({
   const canUpload = viewerDepartment === "Sales" || viewerDepartment === "Admin" || viewerDepartment === "R&D";
   const { pushToast } = useToast();
   const isCostingBoqMode = uploadType === "costing_boq";
+  const latestDocument = useMemo(() => {
+    if (!documents.length) {
+      return null;
+    }
+
+    return documents.reduce((latest, current) =>
+      new Date(current.created_at).getTime() > new Date(latest.created_at).getTime() ? current : latest
+    );
+  }, [documents]);
 
   const handleUpload = () => {
     if (!selectedFile) {
@@ -96,6 +105,20 @@ export function ProjectDocumentsPanel({
                 ? "This unlocks R&D stage completion and alerts the assigned person, Sales, and Admin."
                 : "Sales and Admin can add or replace BOQ files at any time."}
             </p>
+            {latestDocument ? (
+              <div className="mt-3 rounded-2xl border border-ink/10 bg-white/80 px-3 py-3 text-xs text-ink/60">
+                <div className="font-semibold uppercase tracking-[0.14em] text-ink/45">Latest upload</div>
+                <div className="mt-1 text-sm font-medium text-ink">{latestDocument.file_name}</div>
+                <div className="mt-1">
+                  Time stamped {formatDateTime(latestDocument.created_at)}
+                  {latestDocument.uploaded_by_name ? ` by ${latestDocument.uploaded_by_name}` : ""}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 rounded-2xl border border-ink/10 bg-white/80 px-3 py-3 text-xs text-ink/55">
+                Every uploaded file is time stamped automatically here for the team handoff trail.
+              </div>
+            )}
             {error ? (
               <p className="mt-3 rounded-2xl border border-danger/15 bg-danger/5 px-3 py-2 text-sm text-danger">
                 {error}
@@ -117,11 +140,13 @@ export function ProjectDocumentsPanel({
                   <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-ink/65">
                     {formatDocumentTypeLabel(document.document_type)}
                   </span>
-                  <span className="text-sm font-semibold text-ink">{document.file_name}</span>
+                  <span className="rounded-full border border-ink/10 bg-white px-3 py-1 text-xs font-semibold text-ink/70">
+                    Time stamped {formatDateTime(document.created_at)}
+                  </span>
                 </div>
+                <p className="text-sm font-semibold text-ink">{document.file_name}</p>
                 <p className="text-sm text-ink/55">
-                  Uploaded {formatDateTime(document.created_at)}
-                  {document.uploaded_by_name ? ` by ${document.uploaded_by_name}` : ""}
+                  {document.uploaded_by_name ? `Uploaded by ${document.uploaded_by_name}` : "Uploaded to project record"}
                 </p>
                 <p className="text-xs text-ink/45">
                   {document.content_type} - {formatFileSize(document.file_size)}
@@ -144,7 +169,7 @@ export function ProjectDocumentsPanel({
           ))
         ) : (
           <div className="rounded-[24px] border border-ink/10 bg-surface-muted/25 px-4 py-5 text-sm text-ink/55">
-            No project documents uploaded yet. Sales/Admin can add the source BOQ, and R&D can attach the completed costing BOQ during the costing handoff.
+            No project documents uploaded yet. Sales/Admin can add the source BOQ, and R&D can attach the completed costing BOQ during the costing handoff. Every upload will be time stamped automatically.
           </div>
         )}
       </div>

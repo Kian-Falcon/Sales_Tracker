@@ -20,6 +20,11 @@ class ProjectPriority(str, Enum):
     ACCELERATED = "accelerated"
 
 
+class ProjectKind(str, Enum):
+    PROJECT = "project"
+    RECURRING = "recurring"
+
+
 class ProjectDocumentType(str, Enum):
     BOQ = "boq"
     COSTING_BOQ = "costing_boq"

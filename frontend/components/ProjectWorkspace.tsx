@@ -32,6 +32,7 @@ import type {
   ProjectCreateInput,
   ProjectDetail,
   ProjectDocument,
+  ProjectKind,
   ProjectMetadataUpdateInput,
   ProjectPriority,
   ProjectSummary,
@@ -45,6 +46,7 @@ import {
   formatCurrency,
   formatDate,
   formatPriority,
+  formatProjectKind,
   titleCasePhase
 } from "@/lib/utils";
 
@@ -135,6 +137,7 @@ function toProjectSummary(project: ProjectDetail): ProjectSummary {
     name: project.name,
     client: project.client,
     brand: project.brand,
+    project_kind: project.project_kind,
     assigned_person_name: project.assigned_person_name,
     priority: project.priority,
     estimated_tat_days: project.estimated_tat_days,
@@ -166,6 +169,7 @@ function applyProjectMetadataPatch(project: ProjectDetail, patch: ProjectMetadat
     ...project,
     name: patch.name ?? project.name,
     client: patch.client ?? project.client,
+    project_kind: patch.project_kind ?? project.project_kind,
     assigned_person_name:
       patch.assigned_person_name === undefined ? project.assigned_person_name : patch.assigned_person_name,
     priority: patch.priority ?? project.priority,
@@ -190,6 +194,7 @@ function buildOptimisticProjectSummary(
     name: input.name,
     client: input.client,
     brand: null,
+    project_kind: input.project_kind,
     assigned_person_name: input.assigned_person_name,
     priority: input.priority,
     estimated_tat_days: input.estimated_tat_days,
@@ -204,7 +209,7 @@ function buildOptimisticProjectSummary(
       id: `${optimisticId}-stage`,
       stage_key: null,
       name: "Creating workflow",
-      phase: "costing",
+      phase: input.requires_fresh_costing ? "costing" : "drawing",
       responsible_dept: viewer?.department ?? "Sales",
       status: "active",
       sort_order: 0,
@@ -418,6 +423,7 @@ export function ProjectWorkspace({
   const [view, setView] = useState<WorkspaceView>("grid");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProjectStatusFilter>("all");
+  const [projectKindFilter, setProjectKindFilter] = useState<ProjectKind | "all">("all");
   const [teamFilter, setTeamFilter] = useState("all");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("due-asc");
@@ -499,7 +505,7 @@ export function ProjectWorkspace({
 
   useEffect(() => {
     setGridPage(1);
-  }, [deferredSearch, overdueOnly, sortMode, statusFilter, teamFilter, view]);
+  }, [deferredSearch, overdueOnly, projectKindFilter, sortMode, statusFilter, teamFilter, view]);
 
   useEffect(() => {
     if (!preferencesHydrated) {
@@ -533,6 +539,7 @@ export function ProjectWorkspace({
   const workspaceQuery = useMemo(
     () => ({
       search: deferredSearch || undefined,
+      project_kind: projectKindFilter !== "all" ? projectKindFilter : undefined,
       status: statusFilter,
       department: teamFilter !== "all" ? (teamFilter as Department) : undefined,
       overdue_only: overdueOnly || undefined,
@@ -541,7 +548,7 @@ export function ProjectWorkspace({
       page_size: gridProjectsPerPage,
       paginate: view === "grid"
     }),
-    [deferredSearch, gridPage, overdueOnly, sortMode, statusFilter, teamFilter, view]
+    [deferredSearch, gridPage, overdueOnly, projectKindFilter, sortMode, statusFilter, teamFilter, view]
   );
 
   useEffect(() => {
@@ -634,6 +641,7 @@ export function ProjectWorkspace({
   const hasActiveFilters =
     search.trim() ||
     statusFilter !== "all" ||
+    projectKindFilter !== "all" ||
     teamFilter !== "all" ||
     overdueOnly;
 
@@ -850,6 +858,7 @@ export function ProjectWorkspace({
               ...entry,
               name: patch.name ?? entry.name,
               client: patch.client ?? entry.client,
+              project_kind: patch.project_kind ?? entry.project_kind,
               assigned_person_name:
                 patch.assigned_person_name === undefined ? entry.assigned_person_name : patch.assigned_person_name,
               priority: patch.priority ?? entry.priority,
@@ -986,7 +995,7 @@ export function ProjectWorkspace({
 
           <div className="border-b border-border bg-surface-muted/35 px-4 py-4 sm:px-5">
             <div className="flex flex-col gap-4">
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,0.8fr))]">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1.3fr)_repeat(4,minmax(0,0.78fr))]">
                 <ToolbarField label="Search">
                   <input
                     value={search}
@@ -1006,6 +1015,18 @@ export function ProjectWorkspace({
                     <option value="active">Active</option>
                     <option value="overdue">Overdue</option>
                     <option value="done">Completed</option>
+                  </select>
+                </ToolbarField>
+
+                <ToolbarField label="Type">
+                  <select
+                    value={projectKindFilter}
+                    onChange={(event) => setProjectKindFilter(event.target.value as ProjectKind | "all")}
+                    className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-accent"
+                  >
+                    <option value="all">All types</option>
+                    <option value="project">Projects</option>
+                    <option value="recurring">Recurring</option>
                   </select>
                 </ToolbarField>
 
@@ -1059,6 +1080,7 @@ export function ProjectWorkspace({
                       onClick={() => {
                         setSearch("");
                         setStatusFilter("all");
+                        setProjectKindFilter("all");
                         setTeamFilter("all");
                         setOverdueOnly(false);
                       }}
@@ -1120,6 +1142,12 @@ export function ProjectWorkspace({
                     <ActiveFilterPill
                       label={`Status: ${getProjectStatusLabel(statusFilter)}`}
                       onClear={() => setStatusFilter("all")}
+                    />
+                  ) : null}
+                  {projectKindFilter !== "all" ? (
+                    <ActiveFilterPill
+                      label={`Type: ${formatProjectKind(projectKindFilter)}`}
+                      onClear={() => setProjectKindFilter("all")}
                     />
                   ) : null}
                   {teamFilter !== "all" ? (
@@ -1487,6 +1515,7 @@ function GridWorkspaceTable({
                       disabled={!canEditProjects || isCreating}
                       name={project.name}
                       client={project.client}
+                      projectKind={project.project_kind}
                       onSave={(name, client) => onPatchProject(project, { name, client })}
                     />
                   </td>
@@ -1880,7 +1909,9 @@ function QuickCreateProjectRow({
   const [form, setForm] = useState({
     name: "",
     client: "",
+    project_kind: "project" as ProjectKind,
     assigned_person_name: viewer?.fullName ?? "",
+    requires_fresh_costing: true,
     priority: "normal" as ProjectPriority,
     estimated_tat_days: "",
     total_order_value: "",
@@ -1912,7 +1943,9 @@ function QuickCreateProjectRow({
     const payload: ProjectCreateInput = {
       name: form.name.trim(),
       client: form.client.trim(),
+      project_kind: form.project_kind,
       assigned_person_name: form.assigned_person_name.trim(),
+      requires_fresh_costing: form.requires_fresh_costing,
       priority: form.priority,
       estimated_tat_days: Number(form.estimated_tat_days),
       total_order_value: Number(form.total_order_value),
@@ -1979,7 +2012,7 @@ function QuickCreateProjectRow({
           </div>
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-[1.3fr_1fr_1fr_0.85fr]">
+        <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-[1.2fr_1fr_1fr_0.9fr_1fr_1fr]">
           <WorkspaceInput
             label="Project name"
             value={form.name}
@@ -1999,6 +2032,17 @@ function QuickCreateProjectRow({
             placeholder="Project owner"
           />
           <label className="space-y-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Project type</span>
+            <select
+              value={form.project_kind}
+              onChange={(event) => updateField("project_kind", event.target.value as ProjectKind)}
+              className="w-full rounded-2xl border border-border bg-surface-muted/35 px-4 py-3 text-sm text-ink outline-none transition focus:border-accent"
+            >
+              <option value="project">Project</option>
+              <option value="recurring">Recurring</option>
+            </select>
+          </label>
+          <label className="space-y-2">
             <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Priority</span>
             <select
               value={form.priority}
@@ -2007,6 +2051,19 @@ function QuickCreateProjectRow({
             >
               <option value="normal">Normal</option>
               <option value="accelerated">Accelerated</option>
+            </select>
+          </label>
+          <label className="space-y-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">
+              Fresh costing
+            </span>
+            <select
+              value={form.requires_fresh_costing ? "yes" : "no"}
+              onChange={(event) => updateField("requires_fresh_costing", event.target.value === "yes")}
+              className="w-full rounded-2xl border border-border bg-surface-muted/35 px-4 py-3 text-sm text-ink outline-none transition focus:border-accent"
+            >
+              <option value="yes">Required</option>
+              <option value="no">Not needed</option>
             </select>
           </label>
         </div>
@@ -2064,6 +2121,9 @@ function QuickCreateProjectRow({
                 {boqFile ? <p className="mt-2 text-sm font-medium text-ink/70">{boqFile.name}</p> : null}
               </div>
             </label>
+            <p className="text-xs text-ink/50 lg:col-span-2">
+              If fresh costing is not needed, the project skips the full costing phase and starts from drawing.
+            </p>
           </div>
         ) : null}
 
@@ -2124,11 +2184,13 @@ function EditableProjectIdentityCell({
   disabled,
   name,
   client,
+  projectKind,
   onSave
 }: {
   disabled: boolean;
   name: string;
   client: string;
+  projectKind: ProjectKind;
   onSave: (name: string, client: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -2239,7 +2301,12 @@ function EditableProjectIdentityCell({
     return (
       <div className="space-y-2">
         <div className="font-semibold text-ink">{name}</div>
-        <div className="text-xs text-ink/55">{client}</div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-ink/55">
+          <span>{client}</span>
+          <span className="rounded-full border border-border bg-white px-2.5 py-1 font-semibold text-ink/60">
+            {formatProjectKind(projectKind)}
+          </span>
+        </div>
       </div>
     );
   }
@@ -2254,7 +2321,12 @@ function EditableProjectIdentityCell({
       className="block w-full rounded-2xl border border-transparent px-3 py-2 text-left transition hover:border-border hover:bg-white"
     >
       <div className="font-semibold text-ink">{name}</div>
-      <div className="text-xs text-ink/55">{client}</div>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-ink/55">
+        <span>{client}</span>
+        <span className="rounded-full border border-border bg-white px-2.5 py-1 font-semibold text-ink/60">
+          {formatProjectKind(projectKind)}
+        </span>
+      </div>
     </button>
   );
 }

@@ -13,7 +13,7 @@ from starlette.datastructures import UploadFile
 from config import Settings
 from database import set_audit_actor
 from models.comment import CommentCreate
-from models.common import CurrentUser, Department, ProjectDocumentType, ProjectPriority, StagePhase, StageStatus
+from models.common import CurrentUser, Department, ProjectDocumentType, ProjectKind, ProjectPriority, StagePhase, StageStatus
 from models.project import ProjectCreate, ProjectUpdate
 from models.stage import (
     StageDueDateChangeRequestCreate,
@@ -110,14 +110,16 @@ class CreateProjectConnection:
                 "name": args[0],
                 "client": args[1],
                 "brand": args[2],
-                "assigned_person_name": args[3],
-                "priority": args[4],
-                "estimated_tat_days": args[5],
-                "total_order_value": args[6],
-                "dispatch_date": args[7],
-                "number_of_stores": args[8],
-                "special_request": args[9],
-                "created_by": args[10],
+                "project_kind": args[3],
+                "assigned_person_name": args[4],
+                "priority": args[5],
+                "estimated_tat_days": args[6],
+                "total_order_value": args[7],
+                "dispatch_date": args[8],
+                "number_of_stores": args[9],
+                "special_request": args[10],
+                "requires_fresh_costing": args[11],
+                "created_by": args[12],
                 "created_at": datetime.now(timezone.utc),
                 "is_archived": False,
             }
@@ -549,6 +551,7 @@ class ProjectUpdateConnection:
             "id": project_id,
             "name": "Current Project",
             "client": "Current Client",
+            "project_kind": ProjectKind.PROJECT.value,
             "assigned_person_name": "Current Owner",
             "priority": ProjectPriority.NORMAL.value,
             "estimated_tat_days": 12,
@@ -615,6 +618,7 @@ class ProjectDetailConnection:
             "name": "Department Visibility Test",
             "client": "Acme",
             "brand": "Kian",
+            "project_kind": ProjectKind.PROJECT.value,
             "assigned_person_name": "Nirvaan",
             "priority": ProjectPriority.NORMAL.value,
             "estimated_tat_days": 12,
@@ -626,6 +630,7 @@ class ProjectDetailConnection:
             "created_by_department": Department.SALES.value,
             "created_at": datetime.now(timezone.utc),
             "is_archived": False,
+            "requires_fresh_costing": True,
         }
         self.stage_rows = [
             {
@@ -944,10 +949,12 @@ def test_create_project_seeds_first_stage_active_and_dates_it(monkeypatch) -> No
     assert len(result.stages) == 2
     assert result.project_code == "P0001"
     assert result.assigned_person_name == "Nirvaan Sawhney"
+    assert result.project_kind == ProjectKind.PROJECT
     assert result.priority == ProjectPriority.ACCELERATED
     assert result.estimated_tat_days == 21
     assert result.total_order_value == 125000
     assert result.number_of_stores == 48
+    assert result.requires_fresh_costing is True
     assert result.created_by_name == "Sales Lead"
     assert result.stages[0].stage_key == "costing_sop_logged"
     assert result.stages[0].status == StageStatus.ACTIVE
@@ -975,6 +982,87 @@ def test_create_project_seeds_first_stage_active_and_dates_it(monkeypatch) -> No
             "project_url": f"http://localhost:3000/projects/{connection.project_id}",
         }
     ]
+
+
+def test_create_project_skips_costing_phase_when_fresh_costing_is_not_required(monkeypatch) -> None:
+    connection = CreateProjectConnection()
+    patch_transaction(monkeypatch, projects, connection)
+    patch_audit_actor(monkeypatch, projects)
+
+    blueprint = [
+        StageTemplate(
+            stage_key="costing_sop_logged",
+            phase=StagePhase.COSTING,
+            name="Costing SOP Logged In",
+            responsible_dept=Department.SALES,
+            sort_order=10,
+            default_due_days=1,
+        ),
+        StageTemplate(
+            stage_key="costing_shared_rd",
+            phase=StagePhase.COSTING,
+            name="Costing Shared by R&D",
+            responsible_dept=Department.RD,
+            sort_order=20,
+            default_due_days=3,
+        ),
+        StageTemplate(
+            stage_key="drawing_sop_logged",
+            phase=StagePhase.DRAWING,
+            name="Drawing SOP Logged In",
+            responsible_dept=Department.SALES,
+            sort_order=30,
+            default_due_days=1,
+        ),
+        StageTemplate(
+            stage_key="drawings_prepared_rd",
+            phase=StagePhase.DRAWING,
+            name="Drawings Prepared by R&D",
+            responsible_dept=Department.RD,
+            sort_order=40,
+            default_due_days=4,
+        ),
+    ]
+
+    async def fake_load_stage_blueprint(_connection):
+        return blueprint
+
+    monkeypatch.setattr(projects, "load_stage_blueprint", fake_load_stage_blueprint)
+
+    result = run_async(
+        projects.create_project(
+            ProjectCreate(
+                name="Display Refresh",
+                client="Acme",
+                brand="Kian",
+                project_kind=ProjectKind.RECURRING,
+                assigned_person_name="Nirvaan Sawhney",
+                assigned_person_email="nirvaan@example.com",
+                requires_fresh_costing=False,
+                priority=ProjectPriority.NORMAL,
+                estimated_tat_days=18,
+                total_order_value=85000,
+            ),
+            pool=object(),
+            settings=Settings(frontend_url="http://localhost:3000"),
+            user=make_user(Department.SALES),
+        )
+    )
+
+    assert result.requires_fresh_costing is False
+    assert result.project_kind == ProjectKind.RECURRING
+    assert [stage.stage_key for stage in result.stages] == [
+        "drawing_sop_logged",
+        "drawings_prepared_rd",
+    ]
+    assert result.enabled_stage_keys == [
+        "drawing_sop_logged",
+        "drawings_prepared_rd",
+    ]
+    assert result.stages[0].status == StageStatus.ACTIVE
+    assert result.stages[0].phase == StagePhase.DRAWING
+    assert result.stages[0].due_date == date.today() + timedelta(days=1)
+    assert all(stage.phase != StagePhase.COSTING for stage in result.stages)
 
 
 def test_list_project_mentionable_users_returns_directory_for_sales_and_admin(monkeypatch) -> None:
@@ -2211,6 +2299,83 @@ def test_disabled_workflow_stages_are_hidden_in_project_detail() -> None:
     ]
 
 
+def test_project_detail_uses_seeded_stage_keys_for_skip_costing_projects() -> None:
+    project_id = uuid4()
+    connection = ProjectDetailConnection(project_id)
+    connection.project_row["requires_fresh_costing"] = False
+    connection.stage_rows = [
+        {
+            "id": connection.sales_stage_id,
+            "project_id": project_id,
+            "stage_key": "drawing_sop_logged",
+            "phase": StagePhase.DRAWING.value,
+            "name": "Drawing SOP Logged In",
+            "responsible_dept": Department.SALES.value,
+            "status": StageStatus.ACTIVE.value,
+            "sort_order": 30,
+            "activated_at": datetime.now(timezone.utc),
+            "due_date": date.today() + timedelta(days=1),
+            "completed_at": None,
+            "completed_by": None,
+        },
+        {
+            "id": connection.future_stage_id,
+            "project_id": project_id,
+            "stage_key": "sample_development_started_rd",
+            "phase": StagePhase.SAMPLING.value,
+            "name": "Sample Development Started by R&D",
+            "responsible_dept": Department.RD.value,
+            "status": StageStatus.PENDING.value,
+            "sort_order": 40,
+            "activated_at": None,
+            "due_date": None,
+            "completed_at": None,
+            "completed_by": None,
+        },
+    ]
+    connection.comment_rows = []
+    connection.workflow_rows = [
+        setting_row("costing_sop_logged", 10, Department.SALES, 1),
+        setting_row("costing_shared_rd", 20, Department.RD, 3),
+        setting_row("drawing_sop_logged", 30, Department.SALES, 1),
+        setting_row("sample_development_started_rd", 40, Department.RD, 2),
+    ]
+
+    detail = run_async(
+        projects.load_project_detail(
+            connection,
+            project_id,
+            viewer_department=Department.SALES,
+            include_pending=True,
+        )
+    )
+
+    assert detail.requires_fresh_costing is False
+    assert detail.enabled_stage_keys == [
+        "drawing_sop_logged",
+        "sample_development_started_rd",
+    ]
+    assert [stage.stage_key for stage in detail.stages] == [
+        "drawing_sop_logged",
+        "sample_development_started_rd",
+    ]
+
+
+def test_workspace_filter_sql_supports_project_kind() -> None:
+    where_clause, params, next_index = projects._workspace_filter_sql(
+        search=None,
+        client=None,
+        project_kind=ProjectKind.RECURRING,
+        status_filter=projects.ProjectWorkspaceStatusFilter.ALL,
+        department=None,
+        overdue_only=False,
+    )
+
+    assert where_clause == "project_kind = $2"
+    assert params == [ProjectKind.RECURRING.value]
+    assert next_index == 3
+
+
 def test_delete_project_cleans_up_audit_rows_and_storage_objects(monkeypatch) -> None:
     project_id = uuid4()
     connection = DeleteProjectConnection(project_id)
@@ -2278,6 +2443,7 @@ def test_update_project_metadata_persists_optional_values(monkeypatch) -> None:
         projects.update_project_metadata(
             project_id,
             ProjectUpdate(
+                project_kind=ProjectKind.RECURRING,
                 assigned_person_name="  Nirvaan  ",
                 priority=ProjectPriority.ACCELERATED,
                 estimated_tat_days=18,
@@ -2299,6 +2465,7 @@ def test_update_project_metadata_persists_optional_values(monkeypatch) -> None:
         project_id,
         "Current Project",
         "Current Client",
+        ProjectKind.RECURRING.value,
         "Nirvaan",
         ProjectPriority.ACCELERATED.value,
         18,

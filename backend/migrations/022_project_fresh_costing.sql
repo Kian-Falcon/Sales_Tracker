@@ -1,0 +1,2 @@
+ALTER TABLE projects
+  ADD COLUMN IF NOT EXISTS requires_fresh_costing BOOLEAN NOT NULL DEFAULT TRUE;

@@ -15,7 +15,7 @@ from auth import get_current_user, require_departments
 from config import Settings, get_settings
 from database import get_pool, record_to_dict, records_to_dicts, set_audit_actor, transaction
 from models.comment import CommentRead
-from models.common import CurrentUser, Department, ProjectDocumentType, StageSnapshot
+from models.common import CurrentUser, Department, ProjectDocumentType, ProjectKind, StagePhase, StageSnapshot
 from models.project import (
     ProjectCreate,
     ProjectDetail,
@@ -103,6 +103,13 @@ def _eta_label(current_stage_due_date: date | None, current_stage_status: str | 
         return "Due today"
 
     return f"{diff_days}d left"
+
+
+def _filter_stage_blueprint_for_project(stage_blueprint, *, requires_fresh_costing: bool):
+    if requires_fresh_costing:
+        return stage_blueprint
+
+    return [template for template in stage_blueprint if template.phase != StagePhase.COSTING]
 
 
 def _reopened_stage_status(due_date: date | None) -> str:
@@ -240,6 +247,7 @@ def _workspace_filter_sql(
     *,
     search: str | None,
     client: str | None,
+    project_kind: ProjectKind | None,
     status_filter: ProjectWorkspaceStatusFilter,
     department: Department | None,
     overdue_only: bool,
@@ -265,6 +273,11 @@ def _workspace_filter_sql(
     if client:
         clauses.append(f"client = ${next_index}")
         params.append(client)
+        next_index += 1
+
+    if project_kind:
+        clauses.append(f"project_kind = ${next_index}")
+        params.append(project_kind.value)
         next_index += 1
 
     if status_filter == ProjectWorkspaceStatusFilter.ACTIVE:
@@ -307,6 +320,7 @@ def _build_project_summary(row: dict) -> ProjectSummary:
         name=normalized["name"],
         client=normalized["client"],
         brand=normalized["brand"],
+        project_kind=normalized["project_kind"],
         assigned_person_name=normalized.get("assigned_person_name"),
         priority=normalized["priority"],
         estimated_tat_days=normalized["estimated_tat_days"],
@@ -516,6 +530,7 @@ async def load_project_detail(
         for stage in stage_rows
         if stage["stage_key"] in enabled_stage_key_set
     ]
+    project_enabled_stage_keys = [stage["stage_key"] for stage in stage_rows]
     if viewer_department not in {None, Department.SALES, Department.ADMIN}:
         stage_rows = [
             stage
@@ -585,7 +600,7 @@ async def load_project_detail(
         comment_rows,
         due_date_request_rows,
         documents,
-        enabled_stage_keys=enabled_stage_keys,
+        enabled_stage_keys=project_enabled_stage_keys,
     )
 
 
@@ -675,6 +690,7 @@ async def get_project_workspace_meta(
 async def get_project_workspace(
     search: str | None = Query(default=None),
     client: str | None = Query(default=None),
+    project_kind: ProjectKind | None = Query(default=None),
     status_filter: ProjectWorkspaceStatusFilter = Query(default=ProjectWorkspaceStatusFilter.ALL, alias="status"),
     department: Department | None = Query(default=None),
     overdue_only: bool = Query(default=False),
@@ -694,6 +710,7 @@ async def get_project_workspace(
         where_clause, filter_params, next_index = _workspace_filter_sql(
             search=search,
             client=client,
+            project_kind=project_kind,
             status_filter=status_filter,
             department=department,
             overdue_only=overdue_only,
@@ -844,7 +861,18 @@ async def create_project(
 ) -> ProjectDetail:
     try:
         async with transaction(pool) as connection:
-            stage_blueprint = await load_stage_blueprint(connection)
+            stage_blueprint = _filter_stage_blueprint_for_project(
+                await load_stage_blueprint(connection),
+                requires_fresh_costing=payload.requires_fresh_costing,
+            )
+            if not stage_blueprint:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "This workflow has no enabled downstream stages after costing is skipped. "
+                        "Re-enable a later stage or require fresh costing for this project."
+                    ),
+                )
             assigned_person_profile = await _load_project_assignee_profile(
                 connection,
                 payload.assigned_person_email,
@@ -870,6 +898,7 @@ async def create_project(
                     name,
                     client,
                     brand,
+                    project_kind,
                     assigned_person_name,
                     priority,
                     estimated_tat_days,
@@ -877,14 +906,16 @@ async def create_project(
                     dispatch_date,
                     number_of_stores,
                     special_request,
+                    requires_fresh_costing,
                     created_by
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                 RETURNING *
                 """,
                 payload.name,
                 payload.client,
                 payload.brand.strip() if payload.brand else None,
+                payload.project_kind.value,
                 assigned_person_profile["display_name"]
                 if assigned_person_profile is not None
                 else payload.assigned_person_name.strip(),
@@ -894,6 +925,7 @@ async def create_project(
                 payload.dispatch_date,
                 payload.number_of_stores,
                 payload.special_request.strip() if payload.special_request else None,
+                payload.requires_fresh_costing,
                 user.user_id,
             )
 
@@ -1059,6 +1091,11 @@ async def update_project_metadata(
             if payload.priority is not None and "priority" in provided_fields
             else current_project_dict["priority"]
         )
+        project_kind = (
+            payload.project_kind.value
+            if payload.project_kind is not None and "project_kind" in provided_fields
+            else current_project_dict["project_kind"]
+        )
         estimated_tat_days = (
             payload.estimated_tat_days
             if "estimated_tat_days" in provided_fields
@@ -1087,13 +1124,14 @@ async def update_project_metadata(
             SET
                 name = $2,
                 client = $3,
-                assigned_person_name = $4,
-                priority = $5,
-                estimated_tat_days = $6,
-                total_order_value = $7,
-                dispatch_date = $8,
-                number_of_stores = $9,
-                special_request = $10
+                project_kind = $4,
+                assigned_person_name = $5,
+                priority = $6,
+                estimated_tat_days = $7,
+                total_order_value = $8,
+                dispatch_date = $9,
+                number_of_stores = $10,
+                special_request = $11
             WHERE id = $1
               AND is_archived = FALSE
             RETURNING id
@@ -1101,6 +1139,7 @@ async def update_project_metadata(
             project_id,
             project_name,
             client_name,
+            project_kind,
             assigned_person_name,
             priority,
             estimated_tat_days,
@@ -1509,6 +1548,7 @@ async def export_projects_csv(
             p.name AS project_name,
             p.client,
             p.brand,
+            p.project_kind,
             p.assigned_person_name,
             p.priority,
             p.estimated_tat_days,
@@ -1556,6 +1596,7 @@ async def export_projects_csv(
             "Project Code",
             "Project Name",
             "Client",
+            "Project Type",
             "Assigned Person",
             "Priority",
             "Project Status",
@@ -1586,6 +1627,7 @@ async def export_projects_csv(
                 normalized["project_code"],
                 normalized["project_name"],
                 normalized["client"],
+                normalized["project_kind"].replace("_", " ").title(),
                 normalized["assigned_person_name"] or "Unassigned",
                 normalized["priority"].title(),
                 _project_status_label(normalized["current_stage_status"]),

@@ -4,7 +4,15 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
 
-from models.common import Department, ProjectDocumentType, ProjectPriority, StagePhase, StageSnapshot, StageStatus
+from models.common import (
+    Department,
+    ProjectDocumentType,
+    ProjectKind,
+    ProjectPriority,
+    StagePhase,
+    StageSnapshot,
+    StageStatus,
+)
 from models.stage import StageRead
 
 
@@ -12,8 +20,10 @@ class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     client: str = Field(min_length=1, max_length=255)
     brand: str | None = Field(default=None, max_length=255)
+    project_kind: ProjectKind = ProjectKind.PROJECT
     assigned_person_name: str = Field(min_length=1, max_length=255)
     assigned_person_email: EmailStr | None = None
+    requires_fresh_costing: bool = True
     priority: ProjectPriority = ProjectPriority.NORMAL
     estimated_tat_days: int = Field(ge=1, le=3650)
     total_order_value: float = Field(ge=0)
@@ -25,6 +35,7 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     client: str | None = Field(default=None, min_length=1, max_length=255)
+    project_kind: ProjectKind | None = None
     assigned_person_name: str | None = Field(default=None, min_length=1, max_length=255)
     priority: ProjectPriority | None = None
     estimated_tat_days: int | None = Field(default=None, ge=1, le=3650)
@@ -55,6 +66,7 @@ class ProjectSummary(BaseModel):
     name: str
     client: str
     brand: str | None = None
+    project_kind: ProjectKind = ProjectKind.PROJECT
     assigned_person_name: str | None = None
     priority: ProjectPriority = ProjectPriority.NORMAL
     estimated_tat_days: int | None = None
@@ -121,6 +133,7 @@ class ProjectDetail(BaseModel):
     name: str
     client: str
     brand: str | None = None
+    project_kind: ProjectKind = ProjectKind.PROJECT
     assigned_person_name: str | None = None
     priority: ProjectPriority = ProjectPriority.NORMAL
     estimated_tat_days: int | None = None
@@ -133,6 +146,7 @@ class ProjectDetail(BaseModel):
     created_by_department: Department | None = None
     created_at: datetime
     is_archived: bool
+    requires_fresh_costing: bool = True
     enabled_stage_keys: list[str] = Field(default_factory=list)
     documents: list[ProjectDocumentRead] = Field(default_factory=list)
     stages: list[StageRead]
@@ -150,6 +164,7 @@ class ProjectExportRow(BaseModel):
     project_name: str
     client: str
     brand: str | None = None
+    project_kind: ProjectKind = ProjectKind.PROJECT
     assigned_person_name: str | None = None
     priority: ProjectPriority
     estimated_tat_days: int | None = None
