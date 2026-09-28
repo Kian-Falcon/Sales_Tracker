@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 import { StageRow } from "@/components/StageRow";
+import { useToast } from "@/components/ToastProvider";
+import { markProjectFreshCostingNotRequired } from "@/lib/api";
 import type { Department, ProjectDetail, Stage } from "@/lib/types";
 import { titleCasePhase } from "@/lib/utils";
 
@@ -39,9 +41,13 @@ export function PipelineView({
   onProjectSyncStateChange?: (projectId: string, label: string | null) => void;
 }) {
   const [project, setProject] = useState(initialProject);
+  const [costingRulePending, startTransition] = useTransition();
+  const [costingRuleError, setCostingRuleError] = useState<string | null>(null);
+  const { pushToast } = useToast();
 
   useEffect(() => {
     setProject(initialProject);
+    setCostingRuleError(null);
   }, [initialProject]);
 
   const handleProjectUpdate = (updatedProject: ProjectDetail) => {
@@ -50,6 +56,39 @@ export function PipelineView({
   };
 
   const orderedStages = sortStages(project.stages);
+  const canManageCostingRequirement = viewerDepartment === "Sales" || viewerDepartment === "Admin";
+  const hasOpenCostingStages = orderedStages.some((stage) => stage.phase === "costing" && stage.status !== "done");
+
+  const handleMarkFreshCostingNotRequired = () => {
+    if (!canManageCostingRequirement || !project.requires_fresh_costing) {
+      return;
+    }
+
+    setCostingRuleError(null);
+    onProjectSyncStateChange?.(project.id, "Skipping unfinished fresh costing stages...");
+
+    startTransition(() => {
+      void (async () => {
+        try {
+          const updatedProject = await markProjectFreshCostingNotRequired(project.id);
+          handleProjectUpdate(updatedProject);
+          pushToast({
+            tone: "success",
+            title: "Fresh costing skipped",
+            description: hasOpenCostingStages
+              ? "The remaining costing steps were skipped and the workflow moved to the next applicable stage."
+              : "This project is now marked as not requiring a fresh costing SOP."
+          });
+        } catch (error) {
+          setCostingRuleError(
+            error instanceof Error ? error.message : "Unable to mark fresh costing as not required right now."
+          );
+        } finally {
+          onProjectSyncStateChange?.(project.id, null);
+        }
+      })();
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -66,6 +105,52 @@ export function PipelineView({
             {viewerDepartment ? `${viewerDepartment} view` : "Shared workflow view"}
           </div>
         </div>
+      </section>
+
+      <section className="rounded-[28px] border border-border bg-white px-5 py-4 shadow-panel">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink/45">Fresh costing SOP</p>
+            {project.requires_fresh_costing ? (
+              <>
+                <h3 className="text-base font-semibold text-ink">This project currently requires the costing phase.</h3>
+                <p className="max-w-2xl text-sm text-ink/60">
+                  If this is a singular project that does not need a fresh costing SOP from R&D, Sales or Admin can
+                  mark it not required here and the workflow will continue from the next applicable stage.
+                </p>
+              </>
+            ) : (
+              <>
+                <h3 className="text-base font-semibold text-ink">Fresh costing is not required for this project.</h3>
+                <p className="max-w-2xl text-sm text-ink/60">
+                  Remaining costing-only handoffs are skipped for this project, and the pipeline continues from the
+                  next applicable stage.
+                </p>
+              </>
+            )}
+          </div>
+
+          {canManageCostingRequirement && project.requires_fresh_costing ? (
+            <button
+              type="button"
+              onClick={handleMarkFreshCostingNotRequired}
+              disabled={costingRulePending}
+              className="rounded-full border border-border px-4 py-2 text-sm font-semibold text-ink transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {costingRulePending ? "Updating..." : "Mark not required"}
+            </button>
+          ) : (
+            <div className="rounded-full border border-border bg-surface-muted/45 px-3 py-2 text-xs font-medium text-ink/60">
+              {project.requires_fresh_costing ? "Sales/Admin only" : "Marked not required"}
+            </div>
+          )}
+        </div>
+
+        {costingRuleError ? (
+          <p className="mt-4 rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-ink">
+            {costingRuleError}
+          </p>
+        ) : null}
       </section>
 
       {orderedStages.length ? (

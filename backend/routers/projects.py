@@ -41,7 +41,7 @@ from services.storage import (
     upload_storage_object,
 )
 from services.notification import NotificationService
-from services.workflow_settings import load_stage_blueprint
+from services.workflow_settings import get_due_days_by_stage_key, load_stage_blueprint
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 logger = logging.getLogger(__name__)
@@ -1154,6 +1154,7 @@ async def update_project_metadata(
             project_id,
             settings=settings,
             viewer_department=user.department,
+            include_pending=True,
         )
 
     return detail
@@ -1248,6 +1249,155 @@ async def reopen_project(
             project_id,
             settings=settings,
             viewer_department=user.department,
+            include_pending=True,
+        )
+
+    return detail
+
+
+@router.patch("/{project_id}/fresh-costing/not-required", response_model=ProjectDetail)
+async def mark_project_fresh_costing_not_required(
+    project_id: UUID,
+    pool=Depends(get_pool),
+    settings: Settings = Depends(get_settings),
+    user: CurrentUser = Depends(get_current_user),
+) -> ProjectDetail:
+    if user.department not in {Department.SALES, Department.ADMIN}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Sales or Admin can mark fresh costing as not required.",
+        )
+
+    async with transaction(pool) as connection:
+        project = await connection.fetchrow(
+            """
+            SELECT *
+            FROM projects
+            WHERE id = $1
+              AND is_archived = FALSE
+            """,
+            project_id,
+        )
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+
+        if not project["requires_fresh_costing"]:
+            return await load_project_detail(
+                connection,
+                project_id,
+                settings=settings,
+                viewer_department=user.department,
+                include_pending=True,
+            )
+
+        stage_rows = records_to_dicts(
+            await connection.fetch(
+                "SELECT * FROM stages WHERE project_id = $1 ORDER BY sort_order",
+                project_id,
+            )
+        )
+
+        incomplete_costing_stages = [
+            stage
+            for stage in stage_rows
+            if stage["phase"] == StagePhase.COSTING.value and stage["status"] != "done"
+        ]
+        active_costing_stages = [
+            stage
+            for stage in incomplete_costing_stages
+            if stage["status"] in {"active", "overdue"}
+        ]
+        pending_costing_stages = [stage for stage in incomplete_costing_stages if stage["status"] == "pending"]
+        active_costing_stage_ids = [stage["id"] for stage in active_costing_stages]
+        pending_costing_stage_ids = [stage["id"] for stage in pending_costing_stages]
+        affected_stage_ids = [stage["id"] for stage in incomplete_costing_stages]
+
+        await set_audit_actor(connection, user.user_id)
+
+        await connection.execute(
+            """
+            UPDATE projects
+            SET requires_fresh_costing = FALSE
+            WHERE id = $1
+            """,
+            project_id,
+        )
+
+        if affected_stage_ids:
+            await connection.execute(
+                """
+                UPDATE stage_due_date_change_requests
+                SET status = 'rejected',
+                    reviewed_by = $2,
+                    review_note = 'Automatically closed because fresh costing was marked not required for this project.',
+                    reviewed_at = NOW(),
+                    updated_at = NOW()
+                WHERE stage_id = ANY($1::uuid[])
+                  AND status = 'pending'
+                """,
+                affected_stage_ids,
+                user.user_id,
+            )
+
+        if active_costing_stage_ids:
+            await connection.execute(
+                """
+                UPDATE stages
+                SET status = 'done',
+                    completed_at = COALESCE(completed_at, NOW()),
+                    completed_by = $2
+                WHERE id = ANY($1::uuid[])
+                """,
+                active_costing_stage_ids,
+                user.user_id,
+            )
+
+        if pending_costing_stage_ids:
+            await connection.execute(
+                """
+                DELETE FROM stages
+                WHERE id = ANY($1::uuid[])
+                """,
+                pending_costing_stage_ids,
+            )
+
+        remaining_stage_rows = []
+        for stage in stage_rows:
+            if stage["id"] in pending_costing_stage_ids:
+                continue
+
+            if stage["id"] in active_costing_stage_ids:
+                stage = {
+                    **stage,
+                    "status": "done",
+                    "completed_by": user.user_id,
+                }
+
+            remaining_stage_rows.append(stage)
+
+        has_live_stage = any(stage["status"] in {"active", "overdue"} for stage in remaining_stage_rows)
+        next_stage = next((stage for stage in remaining_stage_rows if stage["status"] == "pending"), None)
+
+        if not has_live_stage and next_stage is not None:
+            due_days = (await get_due_days_by_stage_key(connection)).get(next_stage["stage_key"])
+            await connection.execute(
+                """
+                UPDATE stages
+                SET status = 'active',
+                    activated_at = COALESCE(activated_at, NOW()),
+                    due_date = CASE WHEN $2::int IS NULL THEN due_date ELSE CURRENT_DATE + $2::int END
+                WHERE id = $1
+                """,
+                next_stage["id"],
+                due_days,
+            )
+
+        detail = await load_project_detail(
+            connection,
+            project_id,
+            settings=settings,
+            viewer_department=user.department,
+            include_pending=True,
         )
 
     return detail
@@ -1434,6 +1584,7 @@ async def get_project(
             project_id,
             settings=settings,
             viewer_department=user.department,
+            include_pending=True,
         )
     except HTTPException as exc:
         status_label = f"http_{exc.status_code}"

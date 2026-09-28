@@ -158,6 +158,16 @@ export function reopenProject(projectId: string, accessToken?: string) {
   );
 }
 
+export function markProjectFreshCostingNotRequired(projectId: string, accessToken?: string) {
+  return apiFetch<ProjectDetail>(
+    `/api/v1/projects/${projectId}/fresh-costing/not-required`,
+    {
+      method: "PATCH"
+    },
+    accessToken
+  );
+}
+
 export function deleteProject(projectId: string, accessToken?: string) {
   return apiFetch<void>(
     `/api/v1/projects/${projectId}`,

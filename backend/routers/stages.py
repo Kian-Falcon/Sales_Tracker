@@ -18,7 +18,7 @@ from models.stage import (
 from observability import log_endpoint_timing
 from routers.projects import load_project_detail
 from services.notification import NotificationService
-from services.workflow_settings import get_due_days_by_stage_key
+from services.workflow_settings import load_stage_blueprint
 
 router = APIRouter(prefix="/api/v1/stages", tags=["stages"])
 logger = logging.getLogger(__name__)
@@ -212,6 +212,25 @@ async def complete_stage(
                 user.user_id,
             )
 
+            stage_blueprint = await load_stage_blueprint(connection)
+            enabled_stage_keys = [template.stage_key for template in stage_blueprint]
+            due_days_by_stage_key = {
+                template.stage_key: template.default_due_days
+                for template in stage_blueprint
+            }
+
+            if enabled_stage_keys:
+                await connection.execute(
+                    """
+                    DELETE FROM stages
+                    WHERE project_id = $1
+                      AND status = 'pending'
+                      AND NOT (stage_key = ANY($2::text[]))
+                    """,
+                    stage["project_id"],
+                    enabled_stage_keys,
+                )
+
             next_stage = await connection.fetchrow(
                 """
                 SELECT *
@@ -219,15 +238,17 @@ async def complete_stage(
                 WHERE project_id = $1
                   AND sort_order > $2
                   AND status = 'pending'
+                  AND stage_key = ANY($3::text[])
                 ORDER BY sort_order
                 LIMIT 1
                 """,
                 stage["project_id"],
                 stage["sort_order"],
+                enabled_stage_keys,
             )
 
             if next_stage is not None:
-                due_days = (await get_due_days_by_stage_key(connection)).get(next_stage["stage_key"])
+                due_days = due_days_by_stage_key.get(next_stage["stage_key"])
                 next_due_date = next_stage["due_date"] if due_days is None else completed_on + timedelta(days=due_days)
                 await connection.execute(
                     """
@@ -268,6 +289,7 @@ async def complete_stage(
                 connection,
                 stage["project_id"],
                 viewer_department=user.department,
+                include_pending=True,
             )
 
         if notification_payload:
@@ -394,6 +416,7 @@ async def reopen_stage(
                 stage["project_id"],
                 settings=settings,
                 viewer_department=user.department,
+                include_pending=True,
             )
 
         return detail
@@ -471,6 +494,7 @@ async def set_stage_due_date(
             connection,
             stage["project_id"],
             viewer_department=user.department,
+            include_pending=True,
         )
 
     return detail
@@ -583,6 +607,7 @@ async def request_stage_due_date_change(
             stage["project_id"],
             settings=settings,
             viewer_department=user.department,
+            include_pending=True,
         )
 
     if notification_payload:
@@ -701,6 +726,7 @@ async def review_stage_due_date_request(
             request_row["project_id"],
             settings=settings,
             viewer_department=user.department,
+            include_pending=True,
         )
 
     if notification_payload:

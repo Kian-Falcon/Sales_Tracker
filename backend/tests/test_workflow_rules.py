@@ -212,6 +212,52 @@ class StageWorkflowConnection:
         return "UPDATE 1"
 
 
+class StageWorkflowSelectiveNextConnection(StageWorkflowConnection):
+    def __init__(
+        self,
+        current_stage: dict,
+        pending_stages: list[dict],
+        project_row: dict | None = None,
+        recipient_rows: list[dict] | None = None,
+    ) -> None:
+        super().__init__(
+            current_stage=current_stage,
+            next_stage=None,
+            project_row=project_row,
+            recipient_rows=recipient_rows,
+        )
+        self.pending_stages = pending_stages
+
+    async def fetchrow(self, sql: str, *args):
+        if "WHERE project_id = $1" in sql and "sort_order > $2" in sql:
+            enabled_stage_keys = set(args[2]) if len(args) > 2 else None
+            for row in self.pending_stages:
+                if row["project_id"] != args[0]:
+                    continue
+                if row["sort_order"] <= args[1]:
+                    continue
+                if row["status"] != StageStatus.PENDING.value:
+                    continue
+                if enabled_stage_keys is not None and row["stage_key"] not in enabled_stage_keys:
+                    continue
+                return row
+            return None
+
+        return await super().fetchrow(sql, *args)
+
+    async def execute(self, sql: str, *args):
+        self.execute_calls.append((sql, args))
+
+        if "DELETE FROM stages" in sql and "status = 'pending'" in sql:
+            enabled_stage_keys = set(args[1])
+            self.pending_stages = [
+                row for row in self.pending_stages if row["status"] != StageStatus.PENDING.value or row["stage_key"] in enabled_stage_keys
+            ]
+            return "DELETE 1"
+
+        return "UPDATE 1"
+
+
 class CommentPool:
     def __init__(
         self,
@@ -735,6 +781,125 @@ class ProjectDetailConnection:
         raise AssertionError(f"Unexpected fetch SQL: {sql}")
 
 
+class SkipFreshCostingConnection(ProjectDetailConnection):
+    def __init__(self, project_id) -> None:
+        super().__init__(project_id)
+        self.execute_calls: list[tuple[str, tuple]] = []
+        self.project_row["requires_fresh_costing"] = True
+        self.costing_sales_stage_id = uuid4()
+        self.costing_rd_stage_id = uuid4()
+        self.drawing_stage_id = uuid4()
+        self.future_stage_id = uuid4()
+        self.stage_rows = [
+            {
+                "id": self.costing_sales_stage_id,
+                "project_id": project_id,
+                "stage_key": "costing_sop_logged",
+                "phase": StagePhase.COSTING.value,
+                "name": "Costing SOP Logged In",
+                "responsible_dept": Department.SALES.value,
+                "status": StageStatus.ACTIVE.value,
+                "sort_order": 10,
+                "activated_at": datetime.now(timezone.utc),
+                "due_date": date.today() + timedelta(days=1),
+                "completed_at": None,
+                "completed_by": None,
+            },
+            {
+                "id": self.costing_rd_stage_id,
+                "project_id": project_id,
+                "stage_key": "costing_bom_prepared",
+                "phase": StagePhase.COSTING.value,
+                "name": "BOM Prepared by R&D",
+                "responsible_dept": Department.RD.value,
+                "status": StageStatus.PENDING.value,
+                "sort_order": 15,
+                "activated_at": None,
+                "due_date": None,
+                "completed_at": None,
+                "completed_by": None,
+            },
+            {
+                "id": self.drawing_stage_id,
+                "project_id": project_id,
+                "stage_key": "drawing_sop_logged",
+                "phase": StagePhase.DRAWING.value,
+                "name": "Drawing SOP Logged In",
+                "responsible_dept": Department.SALES.value,
+                "status": StageStatus.PENDING.value,
+                "sort_order": 50,
+                "activated_at": None,
+                "due_date": None,
+                "completed_at": None,
+                "completed_by": None,
+            },
+            {
+                "id": self.future_stage_id,
+                "project_id": project_id,
+                "stage_key": "sample_development_started_rd",
+                "phase": StagePhase.SAMPLING.value,
+                "name": "Sample Development Started by R&D",
+                "responsible_dept": Department.RD.value,
+                "status": StageStatus.PENDING.value,
+                "sort_order": 100,
+                "activated_at": None,
+                "due_date": None,
+                "completed_at": None,
+                "completed_by": None,
+            },
+        ]
+        self.comment_rows = []
+        self.workflow_rows = [
+            setting_row("costing_sop_logged", 10, Department.SALES, 1),
+            setting_row("costing_bom_prepared", 15, Department.RD, 2),
+            setting_row("drawing_sop_logged", 50, Department.SALES, 2),
+            setting_row("sample_development_started_rd", 100, Department.RD, 2),
+        ]
+
+    async def fetchrow(self, sql: str, *args):
+        if "FROM projects" in sql and "is_archived = FALSE" in sql:
+            return self.project_row
+
+        return await super().fetchrow(sql, *args)
+
+    async def execute(self, sql: str, *args):
+        self.execute_calls.append((sql, args))
+
+        if "SET requires_fresh_costing = FALSE" in sql:
+            self.project_row["requires_fresh_costing"] = False
+            return "UPDATE 1"
+
+        if "UPDATE stage_due_date_change_requests" in sql:
+            return "UPDATE 0"
+
+        if "SET status = 'done'" in sql:
+            stage_ids = set(args[0])
+            completed_by = args[1]
+            for row in self.stage_rows:
+                if row["id"] in stage_ids:
+                    row["status"] = StageStatus.DONE.value
+                    row["completed_at"] = datetime.now(timezone.utc)
+                    row["completed_by"] = completed_by
+            return "UPDATE 1"
+
+        if "DELETE FROM stages" in sql:
+            stage_ids = set(args[0])
+            self.stage_rows = [row for row in self.stage_rows if row["id"] not in stage_ids]
+            return "DELETE 1"
+
+        if "SET status = 'active'" in sql:
+            stage_id = args[0]
+            due_days = args[1]
+            for row in self.stage_rows:
+                if row["id"] == stage_id:
+                    row["status"] = StageStatus.ACTIVE.value
+                    row["activated_at"] = datetime.now(timezone.utc)
+                    row["due_date"] = date.today() + timedelta(days=due_days) if due_days is not None else row["due_date"]
+            return "UPDATE 1"
+
+        return "UPDATE 1"
+
+
 class DueDateRequestConnection:
     def __init__(self, stage: dict, pending_request: dict | None = None) -> None:
         self.stage = stage
@@ -1108,13 +1273,31 @@ def test_complete_stage_marks_done_and_activates_next_stage(monkeypatch) -> None
     audit_calls: list = []
     patch_audit_actor(monkeypatch, stages, audit_calls)
 
-    async def fake_due_days(_connection):
-        return {"samples_shared_client": 5}
+    async def fake_load_stage_blueprint(_connection):
+        return [
+            StageTemplate(
+                stage_key="sample_completed_rd",
+                phase=StagePhase.SAMPLING,
+                name="Sample Completed by R&D",
+                responsible_dept=Department.RD,
+                sort_order=10,
+                default_due_days=5,
+            ),
+            StageTemplate(
+                stage_key="samples_shared_client",
+                phase=StagePhase.SAMPLING,
+                name="Samples Shared with Client",
+                responsible_dept=Department.DISPATCH,
+                sort_order=20,
+                default_due_days=5,
+            ),
+        ]
 
     async def fake_load_project_detail(_connection, project_id, *args, **kwargs):
+        assert kwargs["include_pending"] is True
         return {"project_id": str(project_id), "refreshed": True}
 
-    monkeypatch.setattr(stages, "get_due_days_by_stage_key", fake_due_days)
+    monkeypatch.setattr(stages, "load_stage_blueprint", fake_load_stage_blueprint)
     monkeypatch.setattr(stages, "load_project_detail", fake_load_project_detail)
 
     user = make_user(Department.RD)
@@ -1128,12 +1311,39 @@ def test_complete_stage_marks_done_and_activates_next_stage(monkeypatch) -> None
     )
 
     assert result == {"project_id": str(current["project_id"]), "refreshed": True}
-    assert len(connection.execute_calls) == 2
+    assert len(connection.execute_calls) == 3
     assert "SET status = 'done'" in connection.execute_calls[0][0]
     assert connection.execute_calls[0][1] == (current["id"], user.user_id)
-    assert "SET status = 'active'" in connection.execute_calls[1][0]
-    assert connection.execute_calls[1][1] == (next_stage["id"], 5)
+    assert "DELETE FROM stages" in connection.execute_calls[1][0]
+    assert connection.execute_calls[1][1] == (current["project_id"], ["sample_completed_rd", "samples_shared_client"])
+    assert "SET status = 'active'" in connection.execute_calls[2][0]
+    assert connection.execute_calls[2][1] == (next_stage["id"], 5)
     assert audit_calls == [user.user_id]
+
+
+def test_get_project_detail_endpoint_includes_pending_pipeline_stages(monkeypatch) -> None:
+    project_id = uuid4()
+    connection = object()
+    user = make_user(Department.ADMIN)
+
+    async def fake_load_project_detail(_connection, requested_project_id, *args, **kwargs):
+        assert requested_project_id == project_id
+        assert kwargs["include_pending"] is True
+        assert kwargs["viewer_department"] == user.department
+        return {"id": str(requested_project_id), "pipeline": "full"}
+
+    monkeypatch.setattr(projects, "load_project_detail", fake_load_project_detail)
+
+    result = run_async(
+        projects.get_project(
+            project_id,
+            pool=connection,
+            settings=Settings(),
+            user=user,
+        )
+    )
+
+    assert result == {"id": str(project_id), "pipeline": "full"}
 
 
 def test_complete_stage_requires_costing_boq_before_rd_costing_can_finish(monkeypatch) -> None:
@@ -1198,13 +1408,30 @@ def test_complete_stage_sends_handoff_email_to_next_team(monkeypatch) -> None:
         async def send_stage_handoff_notification(self, **kwargs) -> None:
             sent_notifications.append(kwargs)
 
-    async def fake_due_days(_connection):
-        return {"costing_bom_prepared": 4}
+    async def fake_load_stage_blueprint(_connection):
+        return [
+            StageTemplate(
+                stage_key="costing_sop_logged",
+                phase=StagePhase.COSTING,
+                name="Costing SOP Logged In",
+                responsible_dept=Department.SALES,
+                sort_order=10,
+                default_due_days=1,
+            ),
+            StageTemplate(
+                stage_key="costing_bom_prepared",
+                phase=StagePhase.COSTING,
+                name="BOM Prepared by R&D",
+                responsible_dept=Department.RD,
+                sort_order=20,
+                default_due_days=4,
+            ),
+        ]
 
     async def fake_load_project_detail(_connection, project_id, *args, **kwargs):
         return {"project_id": str(project_id), "handoff": True}
 
-    monkeypatch.setattr(stages, "get_due_days_by_stage_key", fake_due_days)
+    monkeypatch.setattr(stages, "load_stage_blueprint", fake_load_stage_blueprint)
     monkeypatch.setattr(stages, "load_project_detail", fake_load_project_detail)
     monkeypatch.setattr(stages, "NotificationService", FakeNotificationService)
 
@@ -1232,6 +1459,87 @@ def test_complete_stage_sends_handoff_email_to_next_team(monkeypatch) -> None:
             "project_url": f"http://localhost:3000/projects/{current['project_id']}",
         }
     ]
+
+
+def test_complete_stage_skips_disabled_pending_stage_and_activates_next_enabled_stage(monkeypatch) -> None:
+    current = stage_row(
+        name="Costing SOP Logged In",
+        stage_key="costing_sop_logged",
+        responsible_dept=Department.SALES.value,
+        status=StageStatus.ACTIVE.value,
+    )
+    disabled_pending_stage = stage_row(
+        project_id=current["project_id"],
+        stage_key="costing_bom_prepared",
+        name="BOM Prepared by R&D",
+        responsible_dept=Department.RD.value,
+        status=StageStatus.PENDING.value,
+        sort_order=15,
+        due_date=None,
+        activated_at=None,
+    )
+    enabled_pending_stage = stage_row(
+        project_id=current["project_id"],
+        stage_key="costing_shared_rd",
+        name="Costing Shared by R&D",
+        responsible_dept=Department.RD.value,
+        status=StageStatus.PENDING.value,
+        sort_order=20,
+        due_date=None,
+        activated_at=None,
+    )
+    connection = StageWorkflowSelectiveNextConnection(
+        current_stage=current,
+        pending_stages=[disabled_pending_stage, enabled_pending_stage],
+        project_row={"project_code": "P0099", "name": "Skip Disabled Stage"},
+        recipient_rows=[{"email": "rd@example.com"}],
+    )
+
+    patch_transaction(monkeypatch, stages, connection)
+    patch_audit_actor(monkeypatch, stages)
+
+    async def fake_load_stage_blueprint(_connection):
+        return [
+            StageTemplate(
+                stage_key="costing_sop_logged",
+                phase=StagePhase.COSTING,
+                name="Costing SOP Logged In",
+                responsible_dept=Department.SALES,
+                sort_order=10,
+                default_due_days=1,
+            ),
+            StageTemplate(
+                stage_key="costing_shared_rd",
+                phase=StagePhase.COSTING,
+                name="Costing Shared by R&D",
+                responsible_dept=Department.RD,
+                sort_order=20,
+                default_due_days=3,
+            ),
+        ]
+
+    async def fake_load_project_detail(_connection, project_id, *args, **kwargs):
+        assert kwargs["include_pending"] is True
+        return {"project_id": str(project_id), "skipped_disabled_stage": True}
+
+    monkeypatch.setattr(stages, "load_stage_blueprint", fake_load_stage_blueprint)
+    monkeypatch.setattr(stages, "load_project_detail", fake_load_project_detail)
+
+    result = run_async(
+        stages.complete_stage(
+            current["id"],
+            pool=object(),
+            settings=Settings(frontend_url="http://localhost:3000"),
+            user=make_user(Department.SALES),
+        )
+    )
+
+    assert result == {"project_id": str(current["project_id"]), "skipped_disabled_stage": True}
+    assert len(connection.execute_calls) == 3
+    assert "DELETE FROM stages" in connection.execute_calls[1][0]
+    assert connection.execute_calls[1][1] == (current["project_id"], ["costing_sop_logged", "costing_shared_rd"])
+    assert "SET status = 'active'" in connection.execute_calls[2][0]
+    assert connection.execute_calls[2][1] == (enabled_pending_stage["id"], 3)
 
 
 def test_complete_stage_rejects_wrong_department(monkeypatch) -> None:
@@ -1354,6 +1662,66 @@ def test_reopen_project_rejects_wrong_department(monkeypatch) -> None:
     assert exc.value.status_code == 403
     assert exc.value.detail == "Only Sales, Admin, or the last stage owner can reopen a completed project."
     assert connection.execute_calls == []
+
+
+def test_mark_project_fresh_costing_not_required_skips_remaining_costing_stages(monkeypatch) -> None:
+    project_id = uuid4()
+    connection = SkipFreshCostingConnection(project_id)
+    user = make_user(Department.SALES)
+    patch_transaction(monkeypatch, projects, connection)
+    audit_calls: list = []
+    patch_audit_actor(monkeypatch, projects, audit_calls)
+
+    async def fake_due_days_by_stage_key(_connection):
+        return {"drawing_sop_logged": 2}
+
+    monkeypatch.setattr(projects, "get_due_days_by_stage_key", fake_due_days_by_stage_key)
+
+    detail = run_async(
+        projects.mark_project_fresh_costing_not_required(
+            project_id,
+            pool=object(),
+            settings=Settings(),
+            user=user,
+        )
+    )
+
+    assert audit_calls == [user.user_id]
+    assert connection.project_row["requires_fresh_costing"] is False
+    assert detail.requires_fresh_costing is False
+    assert detail.enabled_stage_keys == [
+        "costing_sop_logged",
+        "drawing_sop_logged",
+        "sample_development_started_rd",
+    ]
+    assert [stage.stage_key for stage in detail.stages] == [
+        "costing_sop_logged",
+        "drawing_sop_logged",
+        "sample_development_started_rd",
+    ]
+    assert detail.stages[0].status == StageStatus.DONE
+    assert detail.stages[1].status == StageStatus.ACTIVE
+    assert detail.stages[1].due_date == date.today() + timedelta(days=2)
+    assert all(stage.stage_key != "costing_bom_prepared" for stage in detail.stages)
+
+
+def test_mark_project_fresh_costing_not_required_rejects_non_sales_admin(monkeypatch) -> None:
+    project_id = uuid4()
+    connection = SkipFreshCostingConnection(project_id)
+    patch_transaction(monkeypatch, projects, connection)
+
+    with pytest.raises(HTTPException) as exc:
+        run_async(
+            projects.mark_project_fresh_costing_not_required(
+                project_id,
+                pool=object(),
+                settings=Settings(),
+                user=make_user(Department.RD),
+            )
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Only Sales or Admin can mark fresh costing as not required."
 
 
 def test_reopen_stage_reactivates_selected_stage_and_rewinds_later_progress(monkeypatch) -> None:

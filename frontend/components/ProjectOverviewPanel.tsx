@@ -2,7 +2,7 @@
 import { useEffect, useState, useTransition, type FormEvent } from "react";
 
 import { useToast } from "@/components/ToastProvider";
-import { updateProjectMetadata } from "@/lib/api";
+import { markProjectFreshCostingNotRequired, updateProjectMetadata } from "@/lib/api";
 import type { Department, ProjectDetail, ProjectKind, ProjectPriority } from "@/lib/types";
 import { formatCurrency, formatDate, formatPriority, formatProjectKind } from "@/lib/utils";
 
@@ -11,6 +11,7 @@ type FormState = {
   client: string;
   project_kind: ProjectKind;
   assigned_person_name: string;
+  requires_fresh_costing: boolean;
   priority: ProjectPriority;
   estimated_tat_days: string;
   total_order_value: string;
@@ -24,6 +25,7 @@ function buildFormState(project: ProjectDetail): FormState {
     client: project.client,
     project_kind: project.project_kind,
     assigned_person_name: project.assigned_person_name ?? "",
+    requires_fresh_costing: project.requires_fresh_costing,
     priority: project.priority,
     estimated_tat_days:
       project.estimated_tat_days !== null && project.estimated_tat_days !== undefined
@@ -94,7 +96,7 @@ export function ProjectOverviewPanel({
     startTransition(() => {
       void (async () => {
         try {
-          const updatedProject = await updateProjectMetadata(project.id, {
+          let updatedProject = await updateProjectMetadata(project.id, {
             name: form.name.trim(),
             client: form.client.trim(),
             project_kind: form.project_kind,
@@ -106,15 +108,26 @@ export function ProjectOverviewPanel({
             special_request: form.special_request.trim() || null
           });
 
+          if (project.requires_fresh_costing && !form.requires_fresh_costing) {
+            updatedProject = await markProjectFreshCostingNotRequired(project.id);
+          }
+
           setProject(updatedProject);
           setForm(buildFormState(updatedProject));
           setEditorOpen(false);
-          setMessage("Project details updated.");
+          setMessage(
+            project.requires_fresh_costing && !form.requires_fresh_costing
+              ? "Project details updated and fresh costing was marked not required."
+              : "Project details updated."
+          );
           onProjectChange?.(updatedProject);
           pushToast({
             tone: "success",
             title: "Project updated",
-            description: "The record fields were saved successfully."
+            description:
+              project.requires_fresh_costing && !form.requires_fresh_costing
+                ? "The record fields were saved and the remaining costing-only steps were skipped."
+                : "The record fields were saved successfully."
           });
         } catch (caughtError) {
           setError(caughtError instanceof Error ? caughtError.message : "Unable to update this project.");
@@ -203,8 +216,8 @@ export function ProjectOverviewPanel({
           <div className="rounded-[24px] border border-border bg-surface-muted/30 px-4 py-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Workflow note</p>
             <p className="mt-2 text-sm leading-6 text-ink/75">
-              This project was created without a fresh costing SOP requirement, so the costing phase was skipped and
-              the workflow started from drawing.
+              Fresh costing is not required for this project. Any unfinished costing-only handoffs are skipped, and
+              the workflow continues from the next applicable stage.
             </p>
           </div>
         ) : null}
@@ -250,6 +263,23 @@ export function ProjectOverviewPanel({
                 onChange={(value) => updateField("assigned_person_name", value)}
                 placeholder="Project owner or account manager"
               />
+              <label className="block space-y-2">
+                <span className="text-sm font-medium text-ink/70">Fresh costing SOP required?</span>
+                <select
+                  value={form.requires_fresh_costing ? "yes" : "no"}
+                  onChange={(event) => updateField("requires_fresh_costing", event.target.value === "yes")}
+                  disabled={!project.requires_fresh_costing}
+                  className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm outline-none transition focus:border-accent disabled:cursor-not-allowed disabled:bg-surface-muted/40 disabled:text-ink/45"
+                >
+                  <option value="yes">Yes, required</option>
+                  <option value="no">No, skip remaining costing</option>
+                </select>
+                <p className="text-xs text-ink/50">
+                  {project.requires_fresh_costing
+                    ? "Choose `No` to skip the remaining costing-only handoffs for this project."
+                    : "Fresh costing has already been marked not required for this project."}
+                </p>
+              </label>
 
               <label className="block space-y-2">
                 <span className="text-sm font-medium text-ink/70">Priority</span>
