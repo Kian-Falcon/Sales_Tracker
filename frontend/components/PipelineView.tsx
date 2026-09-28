@@ -12,6 +12,17 @@ function sortStages(stages: Stage[]) {
   return [...stages].sort((left, right) => left.sort_order - right.sort_order);
 }
 
+function getVisibleStages(stages: Stage[]) {
+  const orderedStages = sortStages(stages);
+  const firstOpenStageIndex = orderedStages.findIndex((stage) => stage.status !== "done");
+
+  if (firstOpenStageIndex === -1) {
+    return orderedStages;
+  }
+
+  return orderedStages.filter((stage, index) => stage.status === "done" || index === firstOpenStageIndex);
+}
+
 function PhaseDivider({
   phase
 }: {
@@ -55,6 +66,7 @@ export function PipelineView({
     onProjectChange?.(updatedProject);
   };
 
+  const visibleStages = getVisibleStages(project.stages);
   const orderedStages = sortStages(project.stages);
   const canManageCostingRequirement = viewerDepartment === "Sales" || viewerDepartment === "Admin";
   const hasOpenCostingStages = orderedStages.some((stage) => stage.phase === "costing" && stage.status !== "done");
@@ -98,7 +110,7 @@ export function PipelineView({
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink/45">Pipeline</p>
             <h2 className="text-lg font-semibold text-ink">Stage-by-stage workflow</h2>
             <p className="text-sm text-ink/60">
-              Every stage is shown individually in sequence, without milestone bundling or progress markers.
+              Completed handoffs stay visible, while only the next live stage is expanded into the working pipeline.
             </p>
           </div>
           <div className="rounded-full border border-border bg-surface-muted/45 px-3 py-2 text-xs font-medium text-ink/60">
@@ -153,10 +165,10 @@ export function PipelineView({
         ) : null}
       </section>
 
-      {orderedStages.length ? (
+      {visibleStages.length ? (
         <div className="space-y-4">
-          {orderedStages.map((stage, index) => {
-            const previousStage = orderedStages[index - 1];
+          {visibleStages.map((stage, index) => {
+            const previousStage = visibleStages[index - 1];
             const showPhaseDivider = index === 0 || previousStage.phase !== stage.phase;
 
             return (
