@@ -13,9 +13,9 @@ export async function GET(request: NextRequest) {
   const tokenHash = requestUrl.searchParams.get("token_hash");
   const type = requestUrl.searchParams.get("type");
   const next = requestUrl.searchParams.get("next");
-  const redirectPath = next?.startsWith("/") ? next : "/dashboard";
+  const redirectPath = next?.startsWith("/") ? next : type === "recovery" ? "/reset-password" : "/dashboard";
   const successUrl = new URL(redirectPath, request.url);
-  const failureUrl = new URL("/login", request.url);
+  const failureUrl = new URL(redirectPath === "/reset-password" ? "/forgot-password" : "/login", request.url);
 
   try {
     const supabase = createServerSupabaseClient();

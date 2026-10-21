@@ -3,8 +3,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { updateSession } from "@/lib/supabase-middleware";
 
 export async function middleware(request: NextRequest) {
-  const isAuthRoute =
-    request.nextUrl.pathname.startsWith("/login") || request.nextUrl.pathname.startsWith("/signup");
+  const isGuestOnlyRoute =
+    request.nextUrl.pathname.startsWith("/login") ||
+    request.nextUrl.pathname.startsWith("/signup") ||
+    request.nextUrl.pathname.startsWith("/forgot-password");
+  const isPublicAuthRoute = isGuestOnlyRoute || request.nextUrl.pathname.startsWith("/reset-password");
 
   if (
     request.nextUrl.pathname.startsWith("/_next") ||
@@ -20,17 +23,17 @@ export async function middleware(request: NextRequest) {
       data: { session }
     } = await supabase.auth.getSession();
 
-    if (!session && !isAuthRoute) {
+    if (!session && !isPublicAuthRoute) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
 
-    if (session && isAuthRoute) {
+    if (session && isGuestOnlyRoute) {
       return NextResponse.redirect(new URL("/dashboard", request.url));
     }
 
     return response;
   } catch {
-    if (!isAuthRoute) {
+    if (!isPublicAuthRoute) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
     return NextResponse.next();

@@ -64,6 +64,12 @@ export function LoginForm() {
         placeholder="Enter your password"
       />
 
+      <div className="-mt-1 flex justify-end">
+        <Link href="/forgot-password" className="text-sm font-medium text-accent transition hover:text-ink">
+          Forgot password?
+        </Link>
+      </div>
+
       {error ? <p className="rounded-2xl border border-border bg-surface-muted px-4 py-3 text-sm text-ink">{error}</p> : null}
 
       <button

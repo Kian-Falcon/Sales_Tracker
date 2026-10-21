@@ -19,11 +19,17 @@ export function getBrowserSiteUrl() {
   return normalizeSiteUrl(process.env.NEXT_PUBLIC_SITE_URL);
 }
 
-export function getAuthCallbackUrl() {
+export function getAuthCallbackUrl(nextPath?: string) {
   const siteUrl = getBrowserSiteUrl();
   if (!siteUrl) {
     return undefined;
   }
 
-  return new URL("/api/auth/callback", siteUrl).toString();
+  const callbackUrl = new URL("/api/auth/callback", siteUrl);
+
+  if (nextPath?.startsWith("/")) {
+    callbackUrl.searchParams.set("next", nextPath);
+  }
+
+  return callbackUrl.toString();
 }
