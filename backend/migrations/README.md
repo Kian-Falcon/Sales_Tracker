@@ -40,6 +40,7 @@ Run these files in Supabase SQL Editor, top to bottom:
 21. `021_workflow_stage_enablement.sql`
 22. `022_project_fresh_costing.sql`
 23. `023_project_kind.sql`
+24. `024_project_direct_to_production.sql`
 
 ## What The Migrations Create
 
@@ -63,6 +64,7 @@ Run these files in Supabase SQL Editor, top to bottom:
 - workflow-stage enablement controls so Admin can disable unused stages from the shared pipeline
 - a per-project `requires_fresh_costing` flag so singular jobs can skip the costing phase and begin from drawing
 - a `project_kind` field so teams can classify work as standard `project` or `recurring` and filter the dashboard accordingly
+- a per-project `direct_to_production` flag so repeat jobs can skip upstream stages and begin straight in production
 - RLS policies for authenticated reads and service-role writes
 
 ## After Running Migrations

@@ -36,6 +36,7 @@ import type {
   ProjectMetadataUpdateInput,
   ProjectPriority,
   ProjectSummary,
+  ProjectWorkflowRoute,
   ProjectWorkspaceMeta,
   ProjectWorkspacePage,
   StageStatus,
@@ -47,6 +48,7 @@ import {
   formatDate,
   formatPriority,
   formatProjectKind,
+  formatProjectWorkflowRoute,
   titleCasePhase
 } from "@/lib/utils";
 
@@ -187,6 +189,13 @@ function buildOptimisticProjectSummary(
   optimisticId: string
 ): ProjectSummary {
   const createdAt = new Date().toISOString();
+  const startingPhase = input.direct_to_production ? "production" : input.requires_fresh_costing ? "costing" : "drawing";
+  const startingStageName = input.direct_to_production
+    ? "Order SOP Logged Into Production"
+    : input.requires_fresh_costing
+      ? "Costing SOP Logged In"
+      : "Drawing SOP Logged In";
+  const startingDepartment = input.direct_to_production ? "Production" : "Sales";
 
   return {
     id: optimisticId,
@@ -208,9 +217,9 @@ function buildOptimisticProjectSummary(
     current_stage: {
       id: `${optimisticId}-stage`,
       stage_key: null,
-      name: "Creating workflow",
-      phase: input.requires_fresh_costing ? "costing" : "drawing",
-      responsible_dept: viewer?.department ?? "Sales",
+      name: startingStageName,
+      phase: startingPhase,
+      responsible_dept: startingDepartment,
       status: "active",
       sort_order: 0,
       activated_at: createdAt,
@@ -1911,7 +1920,7 @@ function QuickCreateProjectRow({
     client: "",
     project_kind: "project" as ProjectKind,
     assigned_person_name: viewer?.fullName ?? "",
-    requires_fresh_costing: true,
+    workflow_route: "full" as ProjectWorkflowRoute,
     priority: "normal" as ProjectPriority,
     estimated_tat_days: "",
     total_order_value: "",
@@ -1945,7 +1954,8 @@ function QuickCreateProjectRow({
       client: form.client.trim(),
       project_kind: form.project_kind,
       assigned_person_name: form.assigned_person_name.trim(),
-      requires_fresh_costing: form.requires_fresh_costing,
+      requires_fresh_costing: form.workflow_route === "full",
+      direct_to_production: form.workflow_route === "direct_production",
       priority: form.priority,
       estimated_tat_days: Number(form.estimated_tat_days),
       total_order_value: Number(form.total_order_value),
@@ -2055,16 +2065,24 @@ function QuickCreateProjectRow({
           </label>
           <label className="space-y-2">
             <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">
-              Fresh costing
+              Workflow route
             </span>
             <select
-              value={form.requires_fresh_costing ? "yes" : "no"}
-              onChange={(event) => updateField("requires_fresh_costing", event.target.value === "yes")}
+              value={form.workflow_route}
+              onChange={(event) => updateField("workflow_route", event.target.value as ProjectWorkflowRoute)}
               className="w-full rounded-2xl border border-border bg-surface-muted/35 px-4 py-3 text-sm text-ink outline-none transition focus:border-accent"
             >
-              <option value="yes">Required</option>
-              <option value="no">Not needed</option>
+              <option value="full">{formatProjectWorkflowRoute("full")}</option>
+              <option value="skip_costing">{formatProjectWorkflowRoute("skip_costing")}</option>
+              <option value="direct_production">{formatProjectWorkflowRoute("direct_production")}</option>
             </select>
+            <p className="text-xs text-ink/50">
+              {form.workflow_route === "direct_production"
+                ? "Best for repeat jobs that should skip costing, drawing, and sampling."
+                : form.workflow_route === "skip_costing"
+                  ? "Skips fresh costing and starts this project from drawing."
+                  : "Runs the full workflow from costing through dispatch."}
+            </p>
           </label>
         </div>
 

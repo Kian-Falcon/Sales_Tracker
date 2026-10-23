@@ -4,20 +4,33 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition, type ChangeEvent, type FormEvent } from "react";
 
 import { createProject, listProjectMentionableUsers, uploadProjectDocument } from "@/lib/api";
-import type { MentionableUser, ProjectKind, ProjectPriority, ViewerDetails } from "@/lib/types";
+import type { MentionableUser, ProjectKind, ProjectPriority, ProjectWorkflowRoute, ViewerDetails } from "@/lib/types";
+import { formatProjectWorkflowRoute } from "@/lib/utils";
 
 type FormState = {
   name: string;
   client: string;
   project_kind: ProjectKind;
   assigned_person_name: string;
-  requires_fresh_costing: boolean;
+  workflow_route: ProjectWorkflowRoute;
   priority: ProjectPriority;
   estimated_tat_days: string;
   total_order_value: string;
   dispatch_date: string;
   special_request: string;
 };
+
+function workflowRouteHelper(route: ProjectWorkflowRoute) {
+  if (route === "direct_production") {
+    return "Use this for repeat jobs that already have approved costing, drawings, and samples, and should start straight in production.";
+  }
+
+  if (route === "skip_costing") {
+    return "Use this when fresh costing is not needed, but drawing and later stages should still run.";
+  }
+
+  return "Use this for standard projects that should move through costing, drawing, sampling, and production.";
+}
 
 const acceptedDocumentTypes = ".pdf,.csv,.xls,.xlsx,.doc,.docx,.txt,.zip,.png,.jpg,.jpeg";
 
@@ -33,7 +46,7 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
     client: "",
     project_kind: "project",
     assigned_person_name: viewer?.fullName ?? "",
-    requires_fresh_costing: true,
+    workflow_route: "full",
     priority: "normal",
     estimated_tat_days: "",
     total_order_value: "",
@@ -150,7 +163,8 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
             project_kind: form.project_kind,
             assigned_person_name: form.assigned_person_name.trim(),
             assigned_person_email: selectedAssignee?.email,
-            requires_fresh_costing: form.requires_fresh_costing,
+            requires_fresh_costing: form.workflow_route === "full",
+            direct_to_production: form.workflow_route === "direct_production",
             priority: form.priority,
             estimated_tat_days: Number(form.estimated_tat_days),
             total_order_value: Number(form.total_order_value),
@@ -276,18 +290,17 @@ export function NewProjectForm({ viewer }: { viewer: ViewerDetails | null }) {
         </label>
 
         <label className="block space-y-2">
-          <span className="text-sm font-medium text-ink/70">Fresh costing SOP required?</span>
+          <span className="text-sm font-medium text-ink/70">Workflow route</span>
           <select
-            value={form.requires_fresh_costing ? "yes" : "no"}
-            onChange={(event) => updateField("requires_fresh_costing", event.target.value === "yes")}
+            value={form.workflow_route}
+            onChange={(event) => updateField("workflow_route", event.target.value as ProjectWorkflowRoute)}
             className="w-full rounded-2xl border border-ink/10 bg-surface-muted/50 px-4 py-3 text-sm outline-none transition focus:border-accent"
           >
-            <option value="yes">Yes, include fresh costing</option>
-            <option value="no">No, skip costing and start from drawing</option>
+            <option value="full">{formatProjectWorkflowRoute("full")}</option>
+            <option value="skip_costing">{formatProjectWorkflowRoute("skip_costing")}</option>
+            <option value="direct_production">{formatProjectWorkflowRoute("direct_production")}</option>
           </select>
-          <p className="text-xs text-ink/50">
-            Choose `No` for singular projects that do not need a fresh costing SOP from R&D.
-          </p>
+          <p className="text-xs text-ink/50">{workflowRouteHelper(form.workflow_route)}</p>
         </label>
 
         <label className="block space-y-2">

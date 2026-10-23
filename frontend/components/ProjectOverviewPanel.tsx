@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition, type FormEvent } from "react";
 import { useToast } from "@/components/ToastProvider";
 import { markProjectFreshCostingNotRequired, updateProjectMetadata } from "@/lib/api";
 import type { Department, ProjectDetail, ProjectKind, ProjectPriority } from "@/lib/types";
-import { formatCurrency, formatDate, formatPriority, formatProjectKind } from "@/lib/utils";
+import { formatCurrency, formatDate, formatPriority, formatProjectKind, formatProjectWorkflowRoute } from "@/lib/utils";
 
 type FormState = {
   name: string;
@@ -38,6 +38,18 @@ function buildFormState(project: ProjectDetail): FormState {
     dispatch_date: project.dispatch_date ?? "",
     special_request: project.special_request ?? ""
   };
+}
+
+function getProjectWorkflowRoute(project: ProjectDetail) {
+  if (project.direct_to_production) {
+    return "direct_production" as const;
+  }
+
+  if (!project.requires_fresh_costing) {
+    return "skip_costing" as const;
+  }
+
+  return "full" as const;
 }
 
 export function ProjectOverviewPanel({
@@ -108,7 +120,7 @@ export function ProjectOverviewPanel({
             special_request: form.special_request.trim() || null
           });
 
-          if (project.requires_fresh_costing && !form.requires_fresh_costing) {
+          if (!project.direct_to_production && project.requires_fresh_costing && !form.requires_fresh_costing) {
             updatedProject = await markProjectFreshCostingNotRequired(project.id);
           }
 
@@ -174,6 +186,7 @@ export function ProjectOverviewPanel({
           <DetailCard label="Project name" value={project.name} />
           <DetailCard label="Client" value={project.client} />
           <DetailCard label="Project type" value={formatProjectKind(project.project_kind)} />
+          <DetailCard label="Workflow route" value={formatProjectWorkflowRoute(getProjectWorkflowRoute(project))} />
           <DetailCard label="Assigned person" value={project.assigned_person_name ?? "Unassigned"} />
           <DetailCard label="Priority" value={formatPriority(project.priority)} />
           <DetailCard
@@ -193,8 +206,8 @@ export function ProjectOverviewPanel({
           />
           <DetailCard
             label="Fresh costing SOP"
-            value={project.requires_fresh_costing ? "Required" : "Not required"}
-            muted={!project.requires_fresh_costing}
+            value={project.direct_to_production ? "Skipped by production route" : project.requires_fresh_costing ? "Required" : "Not required"}
+            muted={!project.requires_fresh_costing || project.direct_to_production}
           />
           <DetailCard label="Created by" value={project.created_by_name ?? "Workflow user"} />
           <DetailCard
@@ -212,7 +225,15 @@ export function ProjectOverviewPanel({
           </p>
         </div>
 
-        {!project.requires_fresh_costing ? (
+        {project.direct_to_production ? (
+          <div className="rounded-[24px] border border-border bg-surface-muted/30 px-4 py-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Workflow note</p>
+            <p className="mt-2 text-sm leading-6 text-ink/75">
+              This project was created as direct to production, so costing, drawing, and sampling stages were skipped
+              and the workflow started in production.
+            </p>
+          </div>
+        ) : !project.requires_fresh_costing ? (
           <div className="rounded-[24px] border border-border bg-surface-muted/30 px-4 py-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/45">Workflow note</p>
             <p className="mt-2 text-sm leading-6 text-ink/75">
@@ -263,23 +284,33 @@ export function ProjectOverviewPanel({
                 onChange={(value) => updateField("assigned_person_name", value)}
                 placeholder="Project owner or account manager"
               />
-              <label className="block space-y-2">
-                <span className="text-sm font-medium text-ink/70">Fresh costing SOP required?</span>
-                <select
-                  value={form.requires_fresh_costing ? "yes" : "no"}
-                  onChange={(event) => updateField("requires_fresh_costing", event.target.value === "yes")}
-                  disabled={!project.requires_fresh_costing}
-                  className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm outline-none transition focus:border-accent disabled:cursor-not-allowed disabled:bg-surface-muted/40 disabled:text-ink/45"
-                >
-                  <option value="yes">Yes, required</option>
-                  <option value="no">No, skip remaining costing</option>
-                </select>
-                <p className="text-xs text-ink/50">
-                  {project.requires_fresh_costing
-                    ? "Choose `No` to skip the remaining costing-only handoffs for this project."
-                    : "Fresh costing has already been marked not required for this project."}
-                </p>
-              </label>
+              {project.direct_to_production ? (
+                <div className="rounded-[22px] border border-border bg-surface-muted/35 px-4 py-4">
+                  <div className="text-sm font-medium text-ink/70">Workflow route</div>
+                  <div className="mt-2 text-sm text-ink/75">
+                    This project already starts directly in production. Upstream stages were not seeded, so this route
+                    can only be chosen when the project is created.
+                  </div>
+                </div>
+              ) : (
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium text-ink/70">Fresh costing SOP required?</span>
+                  <select
+                    value={form.requires_fresh_costing ? "yes" : "no"}
+                    onChange={(event) => updateField("requires_fresh_costing", event.target.value === "yes")}
+                    disabled={!project.requires_fresh_costing}
+                    className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm outline-none transition focus:border-accent disabled:cursor-not-allowed disabled:bg-surface-muted/40 disabled:text-ink/45"
+                  >
+                    <option value="yes">Yes, required</option>
+                    <option value="no">No, skip remaining costing</option>
+                  </select>
+                  <p className="text-xs text-ink/50">
+                    {project.requires_fresh_costing
+                      ? "Choose `No` to skip the remaining costing-only handoffs for this project."
+                      : "Fresh costing has already been marked not required for this project."}
+                  </p>
+                </label>
+              )}
 
               <label className="block space-y-2">
                 <span className="text-sm font-medium text-ink/70">Priority</span>

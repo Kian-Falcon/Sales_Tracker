@@ -9,6 +9,7 @@ export type Department =
 
 export type ProjectPriority = "normal" | "accelerated";
 export type ProjectKind = "project" | "recurring";
+export type ProjectWorkflowRoute = "full" | "skip_costing" | "direct_production";
 export type ProjectDocumentType = "boq" | "costing_boq" | "attachment";
 export type WorkspaceProjectStatusFilter = "all" | "active" | "overdue" | "done";
 export type WorkspaceProjectSortMode = "created-desc" | "created-asc" | "due-asc" | "priority" | "value-desc";
@@ -188,6 +189,7 @@ export interface ProjectDetail {
   created_at: string;
   is_archived: boolean;
   requires_fresh_costing: boolean;
+  direct_to_production: boolean;
   enabled_stage_keys: string[];
   documents: ProjectDocument[];
   stages: Stage[];
@@ -287,6 +289,7 @@ export interface ProjectCreateInput {
   assigned_person_name: string;
   assigned_person_email?: string;
   requires_fresh_costing: boolean;
+  direct_to_production: boolean;
   priority: ProjectPriority;
   estimated_tat_days: number;
   total_order_value: number;

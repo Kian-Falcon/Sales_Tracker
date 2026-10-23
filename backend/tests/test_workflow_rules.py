@@ -119,7 +119,8 @@ class CreateProjectConnection:
                 "number_of_stores": args[9],
                 "special_request": args[10],
                 "requires_fresh_costing": args[11],
-                "created_by": args[12],
+                "direct_to_production": args[12],
+                "created_by": args[13],
                 "created_at": datetime.now(timezone.utc),
                 "is_archived": False,
             }
@@ -1120,6 +1121,7 @@ def test_create_project_seeds_first_stage_active_and_dates_it(monkeypatch) -> No
     assert result.total_order_value == 125000
     assert result.number_of_stores == 48
     assert result.requires_fresh_costing is True
+    assert result.direct_to_production is False
     assert result.created_by_name == "Sales Lead"
     assert result.stages[0].stage_key == "costing_sop_logged"
     assert result.stages[0].status == StageStatus.ACTIVE
@@ -1215,6 +1217,7 @@ def test_create_project_skips_costing_phase_when_fresh_costing_is_not_required(m
     )
 
     assert result.requires_fresh_costing is False
+    assert result.direct_to_production is False
     assert result.project_kind == ProjectKind.RECURRING
     assert [stage.stage_key for stage in result.stages] == [
         "drawing_sop_logged",
@@ -1228,6 +1231,89 @@ def test_create_project_skips_costing_phase_when_fresh_costing_is_not_required(m
     assert result.stages[0].phase == StagePhase.DRAWING
     assert result.stages[0].due_date == date.today() + timedelta(days=1)
     assert all(stage.phase != StagePhase.COSTING for stage in result.stages)
+
+
+def test_create_project_can_start_directly_in_production(monkeypatch) -> None:
+    connection = CreateProjectConnection()
+    patch_transaction(monkeypatch, projects, connection)
+    patch_audit_actor(monkeypatch, projects)
+
+    blueprint = [
+        StageTemplate(
+            stage_key="costing_sop_logged",
+            phase=StagePhase.COSTING,
+            name="Costing SOP Logged In",
+            responsible_dept=Department.SALES,
+            sort_order=10,
+            default_due_days=1,
+        ),
+        StageTemplate(
+            stage_key="drawings_prepared_rd",
+            phase=StagePhase.DRAWING,
+            name="Drawings Prepared by R&D",
+            responsible_dept=Department.RD,
+            sort_order=60,
+            default_due_days=4,
+        ),
+        StageTemplate(
+            stage_key="order_sop_logged_production",
+            phase=StagePhase.PRODUCTION,
+            name="Order SOP Logged Into Production",
+            responsible_dept=Department.PRODUCTION,
+            sort_order=180,
+            default_due_days=1,
+        ),
+        StageTemplate(
+            stage_key="bom_ordered_production",
+            phase=StagePhase.PRODUCTION,
+            name="BOM Ordered by Production",
+            responsible_dept=Department.PRODUCTION,
+            sort_order=190,
+            default_due_days=2,
+        ),
+    ]
+
+    async def fake_load_stage_blueprint(_connection):
+        return blueprint
+
+    monkeypatch.setattr(projects, "load_stage_blueprint", fake_load_stage_blueprint)
+
+    result = run_async(
+        projects.create_project(
+            ProjectCreate(
+                name="Repeat Rollout",
+                client="Acme",
+                brand="Kian",
+                project_kind=ProjectKind.RECURRING,
+                assigned_person_name="Nirvaan Sawhney",
+                assigned_person_email="nirvaan@example.com",
+                requires_fresh_costing=True,
+                direct_to_production=True,
+                priority=ProjectPriority.NORMAL,
+                estimated_tat_days=10,
+                total_order_value=50000,
+            ),
+            pool=object(),
+            settings=Settings(frontend_url="http://localhost:3000"),
+            user=make_user(Department.SALES),
+        )
+    )
+
+    assert result.project_kind == ProjectKind.RECURRING
+    assert result.requires_fresh_costing is False
+    assert result.direct_to_production is True
+    assert [stage.stage_key for stage in result.stages] == [
+        "order_sop_logged_production",
+        "bom_ordered_production",
+    ]
+    assert result.enabled_stage_keys == [
+        "order_sop_logged_production",
+        "bom_ordered_production",
+    ]
+    assert result.stages[0].status == StageStatus.ACTIVE
+    assert result.stages[0].phase == StagePhase.PRODUCTION
+    assert result.stages[0].due_date == date.today() + timedelta(days=1)
+    assert all(stage.phase == StagePhase.PRODUCTION for stage in result.stages)
 
 
 def test_list_project_mentionable_users_returns_directory_for_sales_and_admin(monkeypatch) -> None:

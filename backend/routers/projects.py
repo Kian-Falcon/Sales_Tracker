@@ -105,7 +105,15 @@ def _eta_label(current_stage_due_date: date | None, current_stage_status: str | 
     return f"{diff_days}d left"
 
 
-def _filter_stage_blueprint_for_project(stage_blueprint, *, requires_fresh_costing: bool):
+def _filter_stage_blueprint_for_project(
+    stage_blueprint,
+    *,
+    requires_fresh_costing: bool,
+    direct_to_production: bool = False,
+):
+    if direct_to_production:
+        return [template for template in stage_blueprint if template.phase == StagePhase.PRODUCTION]
+
     if requires_fresh_costing:
         return stage_blueprint
 
@@ -861,17 +869,26 @@ async def create_project(
 ) -> ProjectDetail:
     try:
         async with transaction(pool) as connection:
+            effective_requires_fresh_costing = payload.requires_fresh_costing and not payload.direct_to_production
             stage_blueprint = _filter_stage_blueprint_for_project(
                 await load_stage_blueprint(connection),
-                requires_fresh_costing=payload.requires_fresh_costing,
+                requires_fresh_costing=effective_requires_fresh_costing,
+                direct_to_production=payload.direct_to_production,
             )
             if not stage_blueprint:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
+                if payload.direct_to_production:
+                    detail = (
+                        "This workflow has no enabled production stages. "
+                        "Re-enable a production stage before creating a direct-to-production project."
+                    )
+                else:
+                    detail = (
                         "This workflow has no enabled downstream stages after costing is skipped. "
                         "Re-enable a later stage or require fresh costing for this project."
-                    ),
+                    )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=detail,
                 )
             assigned_person_profile = await _load_project_assignee_profile(
                 connection,
@@ -907,9 +924,10 @@ async def create_project(
                     number_of_stores,
                     special_request,
                     requires_fresh_costing,
+                    direct_to_production,
                     created_by
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 RETURNING *
                 """,
                 payload.name,
@@ -925,7 +943,8 @@ async def create_project(
                 payload.dispatch_date,
                 payload.number_of_stores,
                 payload.special_request.strip() if payload.special_request else None,
-                payload.requires_fresh_costing,
+                effective_requires_fresh_costing,
+                payload.direct_to_production,
                 user.user_id,
             )
 

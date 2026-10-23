@@ -24,6 +24,7 @@ class ProjectCreate(BaseModel):
     assigned_person_name: str = Field(min_length=1, max_length=255)
     assigned_person_email: EmailStr | None = None
     requires_fresh_costing: bool = True
+    direct_to_production: bool = False
     priority: ProjectPriority = ProjectPriority.NORMAL
     estimated_tat_days: int = Field(ge=1, le=3650)
     total_order_value: float = Field(ge=0)
@@ -147,6 +148,7 @@ class ProjectDetail(BaseModel):
     created_at: datetime
     is_archived: bool
     requires_fresh_costing: bool = True
+    direct_to_production: bool = False
     enabled_stage_keys: list[str] = Field(default_factory=list)
     documents: list[ProjectDocumentRead] = Field(default_factory=list)
     stages: list[StageRead]

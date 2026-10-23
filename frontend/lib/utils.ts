@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 
-import type { ProjectKind, ProjectPriority, StagePhase } from "@/lib/types";
+import type { ProjectKind, ProjectPriority, ProjectWorkflowRoute, StagePhase } from "@/lib/types";
 
 export function cn(...inputs: ClassValue[]) {
   return clsx(...inputs);
@@ -122,6 +122,18 @@ export function formatPriority(priority: ProjectPriority) {
 
 export function formatProjectKind(projectKind: ProjectKind) {
   return projectKind === "recurring" ? "Recurring" : "Project";
+}
+
+export function formatProjectWorkflowRoute(route: ProjectWorkflowRoute) {
+  if (route === "direct_production") {
+    return "Direct to production";
+  }
+
+  if (route === "skip_costing") {
+    return "Start from drawing";
+  }
+
+  return "Full workflow";
 }
 
 export const phaseOrder: StagePhase[] = ["costing", "drawing", "sampling", "production"];
